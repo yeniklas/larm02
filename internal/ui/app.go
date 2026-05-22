@@ -15,6 +15,12 @@ import (
 	"github.com/yeniklas/larm02/internal/config"
 )
 
+var logoText = `    __                         ____ ___ ` + "\n" +
+	`   / /   ____ __________ ___  / __ \__ \` + "\n" +
+	`  / /   / __ ` + "`" + `/ ___/ __ ` + "`" + `__ \/ / / /_/ /` + "\n" +
+	` / /___/ /_/ / /  / / / / / / /_/ / __/ ` + "\n" +
+	`/_____/\__,_/_/  /_/ /_/ /_/\____/____/`
+
 type mode int
 
 const (
@@ -304,17 +310,29 @@ func (m AppModel) renderMain() string {
 	breadcrumb := m.renderBreadcrumb()
 	footer := m.renderFooter()
 
-	headerH := lipgloss.Height(header)
-	breadcrumbH := lipgloss.Height(breadcrumb)
-	footerH := lipgloss.Height(footer)
-	tableH := m.height - headerH - breadcrumbH - footerH
+	fixed := lipgloss.Height(header) + lipgloss.Height(breadcrumb) + lipgloss.Height(footer)
+	parts := []string{header}
+
+	if !m.cfg.DisableLogo {
+		logo := m.renderLogo()
+		fixed += lipgloss.Height(logo)
+		parts = append(parts, logo)
+	}
+
+	parts = append(parts, breadcrumb)
+
+	tableH := m.height - fixed
 	if tableH < 0 {
 		tableH = 0
 	}
-
 	table := renderAlertsTable(m.filtered, m.cursor, m.width, tableH, m.loading, m.spinner, m.cfg.Columns)
+	parts = append(parts, table, footer)
 
-	return lipgloss.JoinVertical(lipgloss.Left, header, breadcrumb, table, footer)
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+}
+
+func (m AppModel) renderLogo() string {
+	return lipgloss.NewStyle().Foreground(colorAccent).PaddingLeft(1).Render(logoText)
 }
 
 func (m AppModel) renderDetailView() string {

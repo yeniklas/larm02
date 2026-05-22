@@ -17,6 +17,7 @@ type Config struct {
 	Acknowledgement AcknowledgementConfig `yaml:"acknowledgement"`
 	Columns         []ColumnConfig        `yaml:"columns"`
 	Theme           Theme                 `yaml:"theme"`
+	DisableLogo     bool                  `yaml:"disable_logo"`
 }
 
 // ColumnConfig defines an extra column in the alerts table backed by a label value.
