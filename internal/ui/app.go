@@ -312,7 +312,7 @@ func (m AppModel) renderMain() string {
 		tableH = 0
 	}
 
-	table := renderAlertsTable(m.filtered, m.cursor, m.width, tableH, m.loading, m.spinner)
+	table := renderAlertsTable(m.filtered, m.cursor, m.width, tableH, m.loading, m.spinner, m.cfg.Columns)
 
 	return lipgloss.JoinVertical(lipgloss.Left, header, breadcrumb, table, footer)
 }

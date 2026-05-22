@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -14,6 +15,28 @@ type Config struct {
 	RefreshInterval duration              `yaml:"refresh_interval"`
 	Healthchecks    map[string][]string   `yaml:"healthchecks"`
 	Acknowledgement AcknowledgementConfig `yaml:"acknowledgement"`
+	Columns         []ColumnConfig        `yaml:"columns"`
+}
+
+// ColumnConfig defines an extra column in the alerts table backed by a label value.
+type ColumnConfig struct {
+	Label  string `yaml:"label"`
+	Header string `yaml:"header"`
+	Width  int    `yaml:"width"`
+}
+
+func (c ColumnConfig) GetHeader() string {
+	if c.Header != "" {
+		return c.Header
+	}
+	return strings.ToUpper(c.Label)
+}
+
+func (c ColumnConfig) GetWidth() int {
+	if c.Width > 0 {
+		return c.Width
+	}
+	return 12
 }
 
 type AcknowledgementConfig struct {

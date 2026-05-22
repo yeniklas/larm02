@@ -124,6 +124,45 @@ func TestLoad_NoAlertmanagers(t *testing.T) {
 	}
 }
 
+func TestLoad_CustomColumns(t *testing.T) {
+	path := writeConfig(t, `
+alertmanagers:
+  - name: prod
+    url: http://am.prod:9093
+columns:
+  - label: team
+    header: TEAM
+    width: 14
+  - label: env
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cfg.Columns) != 2 {
+		t.Fatalf("expected 2 columns, got %d", len(cfg.Columns))
+	}
+
+	col := cfg.Columns[0]
+	if col.Label != "team" {
+		t.Errorf("label: want %q, got %q", "team", col.Label)
+	}
+	if col.GetHeader() != "TEAM" {
+		t.Errorf("header: want %q, got %q", "TEAM", col.GetHeader())
+	}
+	if col.GetWidth() != 14 {
+		t.Errorf("width: want 14, got %d", col.GetWidth())
+	}
+
+	col2 := cfg.Columns[1]
+	if col2.GetHeader() != "ENV" {
+		t.Errorf("default header: want %q, got %q", "ENV", col2.GetHeader())
+	}
+	if col2.GetWidth() != 12 {
+		t.Errorf("default width: want 12, got %d", col2.GetWidth())
+	}
+}
+
 func TestLoad_FileNotFound(t *testing.T) {
 	_, err := Load(filepath.Join(t.TempDir(), "nonexistent.yaml"))
 	if err == nil {

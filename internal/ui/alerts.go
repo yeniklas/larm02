@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/yeniklas/larm02/internal/alertmanager"
+	"github.com/yeniklas/larm02/internal/config"
 )
 
 const (
@@ -29,7 +30,7 @@ var columns = []struct {
 	{"STARTED", 12},
 }
 
-func renderAlertsTable(alerts []alertmanager.Alert, cursor, width, height int, loading bool, sp spinner.Model) string {
+func renderAlertsTable(alerts []alertmanager.Alert, cursor, width, height int, loading bool, sp spinner.Model, extraCols []config.ColumnConfig) string {
 	if loading && len(alerts) == 0 {
 		pad := height / 2
 		return strings.Repeat("\n", pad) + "  " + sp.View() + " Loading alerts…"
@@ -44,6 +45,9 @@ func renderAlertsTable(alerts []alertmanager.Alert, cursor, width, height int, l
 	var headerCells []string
 	for _, col := range columns {
 		headerCells = append(headerCells, headerStyle.Width(col.width).Render(col.header))
+	}
+	for _, col := range extraCols {
+		headerCells = append(headerCells, headerStyle.Width(col.GetWidth()).Render(col.GetHeader()))
 	}
 	sb.WriteString("  " + strings.Join(headerCells, " ") + "\n")
 
@@ -70,7 +74,7 @@ func renderAlertsTable(alerts []alertmanager.Alert, cursor, width, height int, l
 
 	for i := start; i < end; i++ {
 		a := alerts[i]
-		row := formatRow(a, width)
+		row := formatRow(a, width, extraCols)
 		line := "  " + row
 
 		if i == cursor {
@@ -90,7 +94,7 @@ func renderAlertsTable(alerts []alertmanager.Alert, cursor, width, height int, l
 	return sb.String()
 }
 
-func formatRow(a alertmanager.Alert, _ int) string {
+func formatRow(a alertmanager.Alert, _ int, extraCols []config.ColumnConfig) string {
 	alertname := truncate(a.Labels["alertname"], columns[colAlertname].width)
 	severity := a.Labels["severity"]
 	instance := truncate(a.Instance, columns[colInstance].width)
@@ -106,6 +110,10 @@ func formatRow(a alertmanager.Alert, _ int) string {
 		lipgloss.NewStyle().Width(columns[colInstance].width).Render(instance),
 		st,
 		lipgloss.NewStyle().Width(columns[colStarted].width).Render(started),
+	}
+	for _, col := range extraCols {
+		val := truncate(a.Labels[col.Label], col.GetWidth())
+		cells = append(cells, lipgloss.NewStyle().Width(col.GetWidth()).Render(val))
 	}
 	return strings.Join(cells, " ")
 }
