@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -30,8 +31,8 @@ var columns = []struct {
 	{"STARTED", 12},
 }
 
-func renderAlertsTable(alerts []alertmanager.Alert, cursor, width, height int, loading bool, sp spinner.Model, extraCols []config.ColumnConfig) string {
-	if loading && len(alerts) == 0 {
+func renderAlertsTable(items []displayItem, cursor, width, height int, loading bool, sp spinner.Model, extraCols []config.ColumnConfig) string {
+	if loading && len(items) == 0 {
 		pad := height / 2
 		return strings.Repeat("\n", pad) + "  " + sp.View() + " Loading alerts…"
 	}
@@ -48,7 +49,7 @@ func renderAlertsTable(alerts []alertmanager.Alert, cursor, width, height int, l
 	}
 	sb.WriteString("  " + strings.Join(headerCells, " ") + "\n")
 
-	if len(alerts) == 0 {
+	if len(items) == 0 {
 		sb.WriteString("\n  " + styleRefresh.Render("No alerts."))
 		return sb.String()
 	}
@@ -65,28 +66,59 @@ func renderAlertsTable(alerts []alertmanager.Alert, cursor, width, height int, l
 		start = cursor - maxRows + 1
 	}
 	end := start + maxRows
-	if end > len(alerts) {
-		end = len(alerts)
+	if end > len(items) {
+		end = len(items)
 	}
 
 	for i := start; i < end; i++ {
-		a := alerts[i]
-		row := formatRow(a, width, extraCols)
-		line := "  " + row
-
-		if i == cursor {
-			line = styleSelected.Width(width).Render(line)
-			line = strings.Replace(line, "  ", " ▶", 1)
+		item := items[i]
+		var line string
+		switch item.kind {
+		case displayItemGroup:
+			line = renderGroupHeader(item.group, width)
+			if i == cursor {
+				line = styleSelected.Width(width).Render(line)
+			}
+		case displayItemAlert:
+			row := formatRow(item.alert, width, extraCols)
+			line = "  " + row
+			if i == cursor {
+				line = styleSelected.Width(width).Render(line)
+				line = strings.Replace(line, "  ", " ▶", 1)
+			}
 		}
 		sb.WriteString(line + "\n")
 	}
 
-	// scroll indicator
-	if len(alerts) > maxRows {
-		sb.WriteString(styleRefresh.Render(fmt.Sprintf("  %d-%d of %d", start+1, end, len(alerts))) + "\n")
+	if len(items) > maxRows {
+		sb.WriteString(styleRefresh.Render(fmt.Sprintf("  %d-%d of %d", start+1, end, len(items))) + "\n")
 	}
 
 	return sb.String()
+}
+
+func renderGroupHeader(g alertmanager.AlertGroup, width int) string {
+	keys := make([]string, 0, len(g.Labels))
+	for k := range g.Labels {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, k+"="+g.Labels[k])
+	}
+	label := strings.Join(parts, "  ")
+
+	const prefix = "─── "
+	const suffix = " "
+	// 2 for left indent
+	remaining := width - 2 - len(prefix) - len(label) - len(suffix)
+	if remaining < 2 {
+		remaining = 2
+	}
+	line := "  " + prefix + label + suffix + strings.Repeat("─", remaining)
+	return lipgloss.NewStyle().Foreground(colorAccent).Render(line)
 }
 
 func formatRow(a alertmanager.Alert, _ int, extraCols []config.ColumnConfig) string {

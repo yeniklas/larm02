@@ -28,12 +28,26 @@ const (
 	modeFilter
 	modeCommand
 	modeDetail
+	modeGroupDetail
 	modeHelp
 	modeInstances
 )
 
+type displayItemKind int
+
+const (
+	displayItemAlert displayItemKind = iota
+	displayItemGroup
+)
+
+type displayItem struct {
+	kind  displayItemKind
+	alert alertmanager.Alert
+	group alertmanager.AlertGroup
+}
+
 type alertsFetchedMsg struct {
-	alerts []alertmanager.Alert
+	groups []alertmanager.AlertGroup
 	errs   []error
 }
 
@@ -43,23 +57,24 @@ type tickMsg time.Time
 
 // AppModel is the root bubbletea model.
 type AppModel struct {
-	cfg           *config.Config
-	alerts        []alertmanager.Alert
-	filtered      []alertmanager.Alert
-	failingChecks []string // healthcheck names with no matching alerts
-	cursor        int
-	mode          mode
-	filterInput   textinput.Model
-	cmdInput      textinput.Model
-	spinner       spinner.Model
-	loading       bool
-	lastRefresh   time.Time
-	errs             []error
-	statusMsg        string // transient feedback shown in footer, cleared on next fetch
-	width            int
-	height           int
-	hiddenInstances  map[string]bool
-	instanceCursor   int
+	cfg             *config.Config
+	groups          []alertmanager.AlertGroup // raw groups from API
+	alerts          []alertmanager.Alert      // flattened regular alerts (post-healthcheck partition)
+	items           []displayItem             // filtered display list navigated by cursor
+	failingChecks   []string                  // healthcheck names with no matching alerts
+	cursor          int
+	mode            mode
+	filterInput     textinput.Model
+	cmdInput        textinput.Model
+	spinner         spinner.Model
+	loading         bool
+	lastRefresh     time.Time
+	errs            []error
+	statusMsg       string // transient feedback shown in footer, cleared on next fetch
+	width           int
+	height          int
+	hiddenInstances map[string]bool
+	instanceCursor  int
 }
 
 func New(cfg *config.Config) AppModel {
@@ -119,12 +134,13 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case alertsFetchedMsg:
 		m.loading = false
 		m.lastRefresh = time.Now()
-		m.alerts, m.failingChecks = partitionHealthchecks(msg.alerts, m.cfg.Healthchecks)
+		m.groups = msg.groups
+		m.alerts, m.failingChecks = partitionHealthchecks(flattenGroups(msg.groups), m.cfg.Healthchecks)
 		m.errs = msg.errs
 		m.statusMsg = ""
 		m.applyFilter()
-		if m.cursor >= len(m.filtered) && m.cursor > 0 {
-			m.cursor = len(m.filtered) - 1
+		if m.cursor >= len(m.items) && m.cursor > 0 {
+			m.cursor = len(m.items) - 1
 		}
 		return m, nil
 
@@ -152,6 +168,11 @@ func (m AppModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleCommandKey(msg)
 	case modeDetail:
 		return m.handleDetailKey(msg)
+	case modeGroupDetail:
+		if msg.Type == tea.KeyEsc || msg.String() == "q" {
+			m.mode = modeNormal
+		}
+		return m, nil
 	case modeHelp:
 		if msg.Type == tea.KeyEsc || msg.String() == "?" || msg.String() == "q" {
 			m.mode = modeNormal
@@ -188,7 +209,7 @@ func (m AppModel) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "q", "ctrl+c":
 		return m, tea.Quit
 	case "j", "down":
-		if m.cursor < len(m.filtered)-1 {
+		if m.cursor < len(m.items)-1 {
 			m.cursor++
 		}
 	case "k", "up":
@@ -196,8 +217,13 @@ func (m AppModel) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cursor--
 		}
 	case "enter":
-		if len(m.filtered) > 0 {
-			m.mode = modeDetail
+		if len(m.items) > 0 {
+			switch m.items[m.cursor].kind {
+			case displayItemGroup:
+				m.mode = modeGroupDetail
+			case displayItemAlert:
+				m.mode = modeDetail
+			}
 		}
 	case "/":
 		m.mode = modeFilter
@@ -209,8 +235,8 @@ func (m AppModel) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cmdInput.Focus()
 		return m, textinput.Blink
 	case "a":
-		if len(m.filtered) > 0 {
-			return m, acknowledgeAlert(m.filtered[m.cursor], m.cfg)
+		if len(m.items) > 0 && m.items[m.cursor].kind == displayItemAlert {
+			return m, acknowledgeAlert(m.items[m.cursor].alert, m.cfg)
 		}
 	case "r":
 		m.loading = true
@@ -277,25 +303,47 @@ func (m AppModel) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc", "q":
 		m.mode = modeNormal
 	case "a":
-		return m, acknowledgeAlert(m.filtered[m.cursor], m.cfg)
+		if m.cursor < len(m.items) && m.items[m.cursor].kind == displayItemAlert {
+			return m, acknowledgeAlert(m.items[m.cursor].alert, m.cfg)
+		}
 	}
 	return m, nil
 }
 
-// applyFilter filters m.alerts into m.filtered based on filterInput value and hidden instances.
+// applyFilter rebuilds m.items from m.groups, applying the current filter query,
+// hidden instances, and healthcheck exclusions.
 func (m *AppModel) applyFilter() {
+	// Build set of regular (non-healthcheck) alert keys from m.alerts.
+	regularSet := make(map[string]struct{}, len(m.alerts))
+	for _, a := range m.alerts {
+		regularSet[a.Instance+"/"+a.Fingerprint] = struct{}{}
+	}
+
 	query := strings.TrimSpace(m.filterInput.Value())
 
-	var out []alertmanager.Alert
-	for _, a := range m.alerts {
-		if m.hiddenInstances[a.Instance] {
-			continue
+	var items []displayItem
+	for _, g := range m.groups {
+		var matching []alertmanager.Alert
+		for _, a := range g.Alerts {
+			if _, ok := regularSet[a.Instance+"/"+a.Fingerprint]; !ok {
+				continue // healthcheck alert
+			}
+			if m.hiddenInstances[a.Instance] {
+				continue
+			}
+			if query != "" && !matchesFilter(a, query) {
+				continue
+			}
+			matching = append(matching, a)
 		}
-		if query == "" || matchesFilter(a, query) {
-			out = append(out, a)
+		if len(matching) > 0 {
+			items = append(items, displayItem{kind: displayItemGroup, group: g})
+			for _, a := range matching {
+				items = append(items, displayItem{kind: displayItemAlert, alert: a})
+			}
 		}
 	}
-	m.filtered = out
+	m.items = items
 }
 
 // matchesFilter checks if alert matches a simple filter expression.
@@ -337,8 +385,11 @@ func (m AppModel) View() string {
 	if m.mode == modeInstances {
 		return m.renderInstancesOverlay()
 	}
-	if m.mode == modeDetail && len(m.filtered) > 0 {
+	if m.mode == modeDetail && len(m.items) > 0 && m.items[m.cursor].kind == displayItemAlert {
 		return m.renderDetailView()
+	}
+	if m.mode == modeGroupDetail && len(m.items) > 0 && m.items[m.cursor].kind == displayItemGroup {
+		return m.renderGroupDetailView()
 	}
 	return m.renderMain()
 }
@@ -370,7 +421,7 @@ func (m AppModel) renderMain() string {
 	if tableH < 0 {
 		tableH = 0
 	}
-	table := renderAlertsTable(m.filtered, m.cursor, m.width, tableH, m.loading, m.spinner, m.cfg.Columns)
+	table := renderAlertsTable(m.items, m.cursor, m.width, tableH, m.loading, m.spinner, m.cfg.Columns)
 	parts = append(parts, table, footer)
 
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
@@ -382,7 +433,13 @@ func (m AppModel) renderLogo() string {
 
 func (m AppModel) renderDetailView() string {
 	header := m.renderHeader()
-	detail := renderDetail(m.filtered[m.cursor], m.width)
+	detail := renderDetail(m.items[m.cursor].alert, m.width)
+	return lipgloss.JoinVertical(lipgloss.Left, header, detail)
+}
+
+func (m AppModel) renderGroupDetailView() string {
+	header := m.renderHeader()
+	detail := renderGroupDetail(m.items[m.cursor].group, m.width)
 	return lipgloss.JoinVertical(lipgloss.Left, header, detail)
 }
 
@@ -485,9 +542,17 @@ func acknowledgeAlert(alert alertmanager.Alert, cfg *config.Config) tea.Cmd {
 
 func fetchAlerts(cfg *config.Config) tea.Cmd {
 	return func() tea.Msg {
-		alerts, errs := alertmanager.FetchAll(context.Background(), cfg)
-		return alertsFetchedMsg{alerts: alerts, errs: errs}
+		groups, errs := alertmanager.FetchAll(context.Background(), cfg)
+		return alertsFetchedMsg{groups: groups, errs: errs}
 	}
+}
+
+func flattenGroups(groups []alertmanager.AlertGroup) []alertmanager.Alert {
+	var alerts []alertmanager.Alert
+	for _, g := range groups {
+		alerts = append(alerts, g.Alerts...)
+	}
+	return alerts
 }
 
 func scheduleTick(d time.Duration) tea.Cmd {

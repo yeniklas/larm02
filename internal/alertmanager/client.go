@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -15,12 +16,14 @@ import (
 
 var httpClient = &http.Client{Timeout: 10 * time.Second}
 
-// FetchAll retrieves alerts from all configured Alertmanager instances
-// concurrently and merges the results. Errors from individual instances are
-// collected and returned alongside any alerts that did succeed.
-func FetchAll(ctx context.Context, cfg *config.Config) ([]Alert, []error) {
+// FetchAll retrieves alert groups from all configured Alertmanager instances
+// concurrently and merges the results. Groups with identical label sets are
+// merged across instances; alerts within a merged group are deduplicated by
+// instance+fingerprint. Errors from individual instances are collected and
+// returned alongside any groups that did succeed.
+func FetchAll(ctx context.Context, cfg *config.Config) ([]AlertGroup, []error) {
 	type result struct {
-		alerts []Alert
+		groups []AlertGroup
 		err    error
 	}
 
@@ -31,30 +34,74 @@ func FetchAll(ctx context.Context, cfg *config.Config) ([]Alert, []error) {
 		wg.Add(1)
 		go func(idx int, am config.AlertmanagerConfig) {
 			defer wg.Done()
-			alerts, err := fetchOne(ctx, am)
-			results[idx] = result{alerts: alerts, err: err}
+			groups, err := fetchOneGroups(ctx, am)
+			results[idx] = result{groups: groups, err: err}
 		}(i, am)
 	}
 	wg.Wait()
 
-	var merged []Alert
+	type mergedGroup struct {
+		group AlertGroup
+		seen  map[string]struct{}
+	}
+
+	byKey := make(map[string]*mergedGroup)
+	var order []string
 	var errs []error
-	seen := make(map[string]struct{})
 
 	for _, r := range results {
 		if r.err != nil {
 			errs = append(errs, r.err)
 			continue
 		}
-		for _, a := range r.alerts {
-			key := a.Instance + "/" + a.Fingerprint
-			if _, dup := seen[key]; !dup {
-				seen[key] = struct{}{}
-				merged = append(merged, a)
+		for _, g := range r.groups {
+			key := groupKey(g.Labels)
+			if mg, exists := byKey[key]; exists {
+				for _, a := range g.Alerts {
+					alertKey := a.Instance + "/" + a.Fingerprint
+					if _, dup := mg.seen[alertKey]; !dup {
+						mg.seen[alertKey] = struct{}{}
+						mg.group.Alerts = append(mg.group.Alerts, a)
+					}
+				}
+			} else {
+				seen := make(map[string]struct{})
+				alerts := make([]Alert, 0, len(g.Alerts))
+				for _, a := range g.Alerts {
+					alertKey := a.Instance + "/" + a.Fingerprint
+					if _, dup := seen[alertKey]; !dup {
+						seen[alertKey] = struct{}{}
+						alerts = append(alerts, a)
+					}
+				}
+				byKey[key] = &mergedGroup{
+					group: AlertGroup{Labels: g.Labels, Receiver: g.Receiver, Alerts: alerts},
+					seen:  seen,
+				}
+				order = append(order, key)
 			}
 		}
 	}
+
+	merged := make([]AlertGroup, 0, len(order))
+	for _, key := range order {
+		merged = append(merged, byKey[key].group)
+	}
 	return merged, errs
+}
+
+// groupKey returns a canonical string key for a set of group labels.
+func groupKey(labels map[string]string) string {
+	keys := make([]string, 0, len(labels))
+	for k := range labels {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, k+"="+labels[k])
+	}
+	return strings.Join(parts, "\x00")
 }
 
 // PostSilence creates an acknowledgement silence on the Alertmanager instance
@@ -94,8 +141,8 @@ func PostSilence(ctx context.Context, baseURL string, alert Alert, cfg config.Ac
 	return nil
 }
 
-func fetchOne(ctx context.Context, am config.AlertmanagerConfig) ([]Alert, error) {
-	url := strings.TrimRight(am.URL, "/") + "/api/v2/alerts?active=true&silenced=true&inhibited=true"
+func fetchOneGroups(ctx context.Context, am config.AlertmanagerConfig) ([]AlertGroup, error) {
+	url := strings.TrimRight(am.URL, "/") + "/api/v2/alerts/groups?active=true&silenced=true&inhibited=true"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", am.Name, err)
@@ -112,13 +159,15 @@ func fetchOne(ctx context.Context, am config.AlertmanagerConfig) ([]Alert, error
 		return nil, fmt.Errorf("%s: unexpected status %s", am.Name, resp.Status)
 	}
 
-	var alerts []Alert
-	if err := json.NewDecoder(resp.Body).Decode(&alerts); err != nil {
+	var groups []AlertGroup
+	if err := json.NewDecoder(resp.Body).Decode(&groups); err != nil {
 		return nil, fmt.Errorf("%s: decoding response: %w", am.Name, err)
 	}
 
-	for i := range alerts {
-		alerts[i].Instance = am.Name
+	for i := range groups {
+		for j := range groups[i].Alerts {
+			groups[i].Alerts[j].Instance = am.Name
+		}
 	}
-	return alerts, nil
+	return groups, nil
 }

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/yeniklas/larm02/internal/alertmanager"
 )
 
@@ -46,6 +47,43 @@ func renderDetail(a alertmanager.Alert, width int) string {
 
 	sb.WriteString("\n" + styleFooter.Render("<ESC> back"))
 
+	return sb.String()
+}
+
+func renderGroupDetail(g alertmanager.AlertGroup, width int) string {
+	var sb strings.Builder
+
+	keys := sortedKeys(g.Labels)
+	labelParts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		labelParts = append(labelParts, k+"="+g.Labels[k])
+	}
+	header := fmt.Sprintf("Group — %s", strings.Join(labelParts, "  "))
+	sb.WriteString(styleSectionHeader.Render(header) + "\n\n")
+
+	if g.Receiver.Name != "" {
+		sb.WriteString(styleDetailKey.Render("receiver") + styleDetailVal.Render(g.Receiver.Name) + "\n\n")
+	}
+
+	sb.WriteString(styleSectionHeader.Render(fmt.Sprintf("Alerts (%d)", len(g.Alerts))) + "\n")
+	for _, a := range g.Alerts {
+		alertname := truncate(a.Labels["alertname"], columns[colAlertname].width)
+		severity := a.Labels["severity"]
+		instance := truncate(a.Instance, columns[colInstance].width)
+		state := a.Status.State
+		since := humanDuration(time.Since(a.StartsAt))
+
+		line := fmt.Sprintf("  %s  %s  %s  %s  %s ago",
+			lipgloss.NewStyle().Width(columns[colAlertname].width).Render(alertname),
+			severityStyle(severity).Width(columns[colSeverity].width).Render(truncate(severity, columns[colSeverity].width)),
+			lipgloss.NewStyle().Width(columns[colInstance].width).Render(instance),
+			stateStyle(state).Width(columns[colState].width).Render(truncate(state, columns[colState].width)),
+			since,
+		)
+		sb.WriteString(line + "\n")
+	}
+
+	sb.WriteString("\n" + styleFooter.Render("<ESC> back"))
 	return sb.String()
 }
 

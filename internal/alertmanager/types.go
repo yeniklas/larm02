@@ -30,6 +30,12 @@ type Receiver struct {
 	Name string `json:"name"`
 }
 
+type AlertGroup struct {
+	Labels   map[string]string `json:"labels"`
+	Receiver Receiver          `json:"receiver"`
+	Alerts   []Alert           `json:"alerts"`
+}
+
 type Matcher struct {
 	Name    string `json:"name"`
 	Value   string `json:"value"`
