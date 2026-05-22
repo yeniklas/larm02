@@ -348,9 +348,10 @@ func (m AppModel) renderHelp() string {
 }
 
 func (m AppModel) renderHeader() string {
+	counts := countActiveAlertsByInstance(m.alerts)
 	left := styleHeader.Render("larm02")
 	for _, am := range m.cfg.Alertmanagers {
-		left += styleInstance.Render(am.Name)
+		left += styleInstance.Render(fmt.Sprintf("%s (%d)", am.Name, counts[am.Name]))
 	}
 
 	var refreshStr string
@@ -518,4 +519,14 @@ func humanDuration(d time.Duration) string {
 		}
 		return fmt.Sprintf("%d months", months)
 	}
+}
+
+func countActiveAlertsByInstance(alerts []alertmanager.Alert) map[string]int {
+	counts := make(map[string]int)
+	for _, a := range alerts {
+		if a.Status.State == "active" {
+			counts[a.Instance]++
+		}
+	}
+	return counts
 }
