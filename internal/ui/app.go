@@ -29,6 +29,7 @@ const (
 	modeCommand
 	modeDetail
 	modeHelp
+	modeInstances
 )
 
 type alertsFetchedMsg struct {
@@ -53,10 +54,12 @@ type AppModel struct {
 	spinner       spinner.Model
 	loading       bool
 	lastRefresh   time.Time
-	errs          []error
-	statusMsg     string // transient feedback shown in footer, cleared on next fetch
-	width         int
-	height        int
+	errs             []error
+	statusMsg        string // transient feedback shown in footer, cleared on next fetch
+	width            int
+	height           int
+	hiddenInstances  map[string]bool
+	instanceCursor   int
 }
 
 func New(cfg *config.Config) AppModel {
@@ -72,12 +75,20 @@ func New(cfg *config.Config) AppModel {
 	sp.Spinner = spinner.Dot
 	sp.Style = lipgloss.NewStyle().Foreground(colorAccent)
 
+	hidden := make(map[string]bool)
+	for _, am := range cfg.Alertmanagers {
+		if am.Hidden {
+			hidden[am.Name] = true
+		}
+	}
+
 	return AppModel{
-		cfg:         cfg,
-		filterInput: fi,
-		cmdInput:    ci,
-		spinner:     sp,
-		loading:     true,
+		cfg:             cfg,
+		filterInput:     fi,
+		cmdInput:        ci,
+		spinner:         sp,
+		loading:         true,
+		hiddenInstances: hidden,
 	}
 }
 
@@ -146,8 +157,30 @@ func (m AppModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.mode = modeNormal
 		}
 		return m, nil
+	case modeInstances:
+		return m.handleInstancesKey(msg)
 	}
 	return m.handleNormalKey(msg)
+}
+
+func (m AppModel) handleInstancesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "i", "q":
+		m.mode = modeNormal
+	case "j", "down":
+		if m.instanceCursor < len(m.cfg.Alertmanagers)-1 {
+			m.instanceCursor++
+		}
+	case "k", "up":
+		if m.instanceCursor > 0 {
+			m.instanceCursor--
+		}
+	case " ":
+		name := m.cfg.Alertmanagers[m.instanceCursor].Name
+		m.hiddenInstances[name] = !m.hiddenInstances[name]
+		m.applyFilter()
+	}
+	return m, nil
 }
 
 func (m AppModel) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -184,6 +217,9 @@ func (m AppModel) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, fetchAlerts(m.cfg)
 	case "?":
 		m.mode = modeHelp
+	case "i":
+		m.mode = modeInstances
+		m.instanceCursor = 0
 	case "esc":
 		m.filterInput.SetValue("")
 		m.applyFilter()
@@ -246,17 +282,16 @@ func (m AppModel) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// applyFilter filters m.alerts into m.filtered based on filterInput value.
+// applyFilter filters m.alerts into m.filtered based on filterInput value and hidden instances.
 func (m *AppModel) applyFilter() {
 	query := strings.TrimSpace(m.filterInput.Value())
-	if query == "" {
-		m.filtered = m.alerts
-		return
-	}
 
 	var out []alertmanager.Alert
 	for _, a := range m.alerts {
-		if matchesFilter(a, query) {
+		if m.hiddenInstances[a.Instance] {
+			continue
+		}
+		if query == "" || matchesFilter(a, query) {
 			out = append(out, a)
 		}
 	}
@@ -299,10 +334,20 @@ func (m AppModel) View() string {
 	if m.mode == modeHelp {
 		return m.renderHelp()
 	}
+	if m.mode == modeInstances {
+		return m.renderInstancesOverlay()
+	}
 	if m.mode == modeDetail && len(m.filtered) > 0 {
 		return m.renderDetailView()
 	}
 	return m.renderMain()
+}
+
+func (m AppModel) renderInstancesOverlay() string {
+	header := m.renderHeader()
+	counts := countActiveAlertsByInstance(m.alerts)
+	overlay := renderInstances(m.cfg.Alertmanagers, m.hiddenInstances, counts, m.instanceCursor, m.width)
+	return lipgloss.JoinVertical(lipgloss.Left, header, overlay)
 }
 
 func (m AppModel) renderMain() string {
@@ -351,7 +396,11 @@ func (m AppModel) renderHeader() string {
 	counts := countActiveAlertsByInstance(m.alerts)
 	left := styleHeader.Render("larm02")
 	for _, am := range m.cfg.Alertmanagers {
-		left += styleInstance.Render(fmt.Sprintf("%s (%d)", am.Name, counts[am.Name]))
+		s := styleInstance
+		if m.hiddenInstances[am.Name] {
+			s = styleInstanceHidden
+		}
+		left += s.Render(fmt.Sprintf("%s (%d)", am.Name, counts[am.Name]))
 	}
 
 	var refreshStr string
@@ -416,6 +465,7 @@ func (m AppModel) renderFooter() string {
 		hint("Enter", "detail"),
 		hint("a", "ack"),
 		hint("r", "refresh"),
+		hint("i", "instances"),
 		hint("?", "help"),
 		hint("q", "quit"),
 	}

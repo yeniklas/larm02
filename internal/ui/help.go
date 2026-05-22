@@ -15,6 +15,7 @@ var helpBindings = [][2]string{
 	{":", "command mode"},
 	{"a", "acknowledge alert"},
 	{"r", "refresh now"},
+	{"i", "instance visibility"},
 	{"?", "toggle help"},
 	{"q", "quit"},
 }

@@ -69,8 +69,9 @@ func (a AcknowledgementConfig) GetComment() string {
 }
 
 type AlertmanagerConfig struct {
-	Name string `yaml:"name"`
-	URL  string `yaml:"url"`
+	Name   string `yaml:"name"`
+	URL    string `yaml:"url"`
+	Hidden bool   `yaml:"hidden,omitempty"`
 }
 
 // duration wraps time.Duration for yaml unmarshalling.

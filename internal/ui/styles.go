@@ -15,6 +15,7 @@ var (
 
 	styleHeader        lipgloss.Style
 	styleInstance      lipgloss.Style
+	styleInstanceHidden lipgloss.Style
 	styleRefresh       lipgloss.Style
 	styleFooter        lipgloss.Style
 	styleFooterKey     lipgloss.Style
@@ -56,6 +57,12 @@ func ApplyTheme(t config.Theme) {
 	styleInstance = lipgloss.NewStyle().
 		Foreground(fg).
 		Background(instBg).
+		PaddingLeft(1).PaddingRight(1).
+		MarginLeft(1)
+
+	styleInstanceHidden = lipgloss.NewStyle().
+		Foreground(hdrBg).
+		Background(colorMuted).
 		PaddingLeft(1).PaddingRight(1).
 		MarginLeft(1)
 
