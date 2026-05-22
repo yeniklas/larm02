@@ -30,6 +30,8 @@ type alertsFetchedMsg struct {
 	errs   []error
 }
 
+type silencePostedMsg struct{ err error }
+
 type tickMsg time.Time
 
 // AppModel is the root bubbletea model.
@@ -46,6 +48,7 @@ type AppModel struct {
 	loading       bool
 	lastRefresh   time.Time
 	errs          []error
+	statusMsg     string // transient feedback shown in footer, cleared on next fetch
 	width         int
 	height        int
 }
@@ -101,9 +104,20 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lastRefresh = time.Now()
 		m.alerts, m.failingChecks = partitionHealthchecks(msg.alerts, m.cfg.Healthchecks)
 		m.errs = msg.errs
+		m.statusMsg = ""
 		m.applyFilter()
 		if m.cursor >= len(m.filtered) && m.cursor > 0 {
 			m.cursor = len(m.filtered) - 1
+		}
+		return m, nil
+
+	case silencePostedMsg:
+		if msg.err != nil {
+			m.statusMsg = styleError.Render("Ack failed: " + msg.err.Error())
+		} else {
+			m.statusMsg = lipgloss.NewStyle().Foreground(colorGood).Render("Acknowledged.")
+			m.loading = true
+			return m, fetchAlerts(m.cfg)
 		}
 		return m, nil
 
@@ -155,6 +169,10 @@ func (m AppModel) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cmdInput.SetValue("")
 		m.cmdInput.Focus()
 		return m, textinput.Blink
+	case "a":
+		if len(m.filtered) > 0 {
+			return m, acknowledgeAlert(m.filtered[m.cursor], m.cfg)
+		}
 	case "r":
 		m.loading = true
 		return m, fetchAlerts(m.cfg)
@@ -213,8 +231,11 @@ func (m AppModel) handleCommandKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m AppModel) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if msg.Type == tea.KeyEsc || msg.String() == "q" {
+	switch msg.String() {
+	case "esc", "q":
 		m.mode = modeNormal
+	case "a":
+		return m, acknowledgeAlert(m.filtered[m.cursor], m.cfg)
 	}
 	return m, nil
 }
@@ -363,6 +384,10 @@ func (m AppModel) renderFooter() string {
 		return styleFooter.Render(":") + m.cmdInput.View()
 	}
 
+	if m.statusMsg != "" {
+		return styleFooter.Render("  ") + m.statusMsg
+	}
+
 	hint := func(key, desc string) string {
 		return styleFooterKey.Render("<"+key+">") + styleFooter.Render(desc)
 	}
@@ -370,11 +395,23 @@ func (m AppModel) renderFooter() string {
 		hint(":", "cmd"),
 		hint("/", "filter"),
 		hint("Enter", "detail"),
+		hint("a", "ack"),
 		hint("r", "refresh"),
 		hint("?", "help"),
 		hint("q", "quit"),
 	}
 	return styleFooter.Render("  " + strings.Join(parts, "  "))
+}
+
+func acknowledgeAlert(alert alertmanager.Alert, cfg *config.Config) tea.Cmd {
+	return func() tea.Msg {
+		baseURL := cfg.AlertmanagerURL(alert.Instance)
+		if baseURL == "" {
+			return silencePostedMsg{fmt.Errorf("unknown instance %q", alert.Instance)}
+		}
+		err := alertmanager.PostSilence(context.Background(), baseURL, alert, cfg.Acknowledgement)
+		return silencePostedMsg{err}
+	}
 }
 
 func fetchAlerts(cfg *config.Config) tea.Cmd {

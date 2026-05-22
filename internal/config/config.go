@@ -10,9 +10,37 @@ import (
 )
 
 type Config struct {
-	Alertmanagers   []AlertmanagerConfig `yaml:"alertmanagers"`
-	RefreshInterval duration             `yaml:"refresh_interval"`
-	Healthchecks    map[string][]string  `yaml:"healthchecks"`
+	Alertmanagers   []AlertmanagerConfig  `yaml:"alertmanagers"`
+	RefreshInterval duration              `yaml:"refresh_interval"`
+	Healthchecks    map[string][]string   `yaml:"healthchecks"`
+	Acknowledgement AcknowledgementConfig `yaml:"acknowledgement"`
+}
+
+type AcknowledgementConfig struct {
+	Duration string `yaml:"duration"`
+	Author   string `yaml:"author"`
+	Comment  string `yaml:"comment"`
+}
+
+func (a AcknowledgementConfig) GetDuration() time.Duration {
+	if d, err := time.ParseDuration(a.Duration); err == nil && d > 0 {
+		return d
+	}
+	return 15 * time.Minute
+}
+
+func (a AcknowledgementConfig) GetAuthor() string {
+	if a.Author != "" {
+		return a.Author
+	}
+	return "larm02"
+}
+
+func (a AcknowledgementConfig) GetComment() string {
+	if a.Comment != "" {
+		return a.Comment
+	}
+	return "ACK! This alert was acknowledged using larm02 on %NOW%"
 }
 
 type AlertmanagerConfig struct {
@@ -37,6 +65,16 @@ func (c *Config) GetRefreshInterval() time.Duration {
 		return 30 * time.Second
 	}
 	return c.RefreshInterval.Duration
+}
+
+// AlertmanagerURL returns the base URL for the named instance, or "" if not found.
+func (c *Config) AlertmanagerURL(name string) string {
+	for _, am := range c.Alertmanagers {
+		if am.Name == name {
+			return am.URL
+		}
+	}
+	return ""
 }
 
 func Load(path string) (*Config, error) {

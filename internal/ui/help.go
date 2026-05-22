@@ -13,6 +13,7 @@ var helpBindings = [][2]string{
 	{"/", "filter alerts"},
 	{"ESC", "cancel / close"},
 	{":", "command mode"},
+	{"a", "acknowledge alert"},
 	{"r", "refresh now"},
 	{"?", "toggle help"},
 	{"q", "quit"},

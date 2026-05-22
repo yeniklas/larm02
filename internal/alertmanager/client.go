@@ -1,6 +1,7 @@
 package alertmanager
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -54,6 +55,43 @@ func FetchAll(ctx context.Context, cfg *config.Config) ([]Alert, []error) {
 		}
 	}
 	return merged, errs
+}
+
+// PostSilence creates an acknowledgement silence on the Alertmanager instance
+// identified by baseURL, matching all labels of the given alert.
+func PostSilence(ctx context.Context, baseURL string, alert Alert, cfg config.AcknowledgementConfig) error {
+	now := time.Now().UTC()
+	silence := PostableSilence{
+		Matchers:  MatchersFromLabels(alert.Labels),
+		StartsAt:  now,
+		EndsAt:    now.Add(cfg.GetDuration()),
+		CreatedBy: cfg.GetAuthor(),
+		Comment:   RenderComment(cfg.GetComment()),
+	}
+
+	body, err := json.Marshal(silence)
+	if err != nil {
+		return fmt.Errorf("marshal silence: %w", err)
+	}
+
+	url := strings.TrimRight(baseURL, "/") + "/api/v2/silences"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("unexpected status %s", resp.Status)
+	}
+	return nil
 }
 
 func fetchOne(ctx context.Context, am config.AlertmanagerConfig) ([]Alert, error) {

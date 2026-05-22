@@ -38,6 +38,9 @@ larm02 --config /path/to/config.yaml
 | `alertmanagers[].url` | — | Base URL of the Alertmanager instance |
 | `refresh_interval` | `30s` | How often to poll for new alerts |
 | `healthchecks` | — | Named watchdog filter sets (see below) |
+| `acknowledgement.duration` | `15m` | How long the silence lasts |
+| `acknowledgement.author` | `larm02` | `createdBy` field on the silence |
+| `acknowledgement.comment` | `ACK! … on %NOW%` | Comment template; `%NOW%` is replaced with the current UTC time |
 
 ### Healthchecks (watchdog alerts)
 
@@ -73,6 +76,7 @@ larm02 --self-update                # update to the latest release
 | `ESC` | Close detail / clear filter |
 | `/` | Filter alerts |
 | `:` | Command mode |
+| `a` | Acknowledge selected alert |
 | `r` | Refresh now |
 | `?` | Toggle help |
 | `q` / `Ctrl+C` | Quit |
@@ -95,6 +99,19 @@ Press `:` to enter a command:
 |---|---|
 | `alerts` | Return to the alerts view |
 | `quit` / `q` | Quit |
+
+### Acknowledgement
+
+Press `a` on any alert (in the list or in detail view) to acknowledge it. larm02 posts a short-lived silence to the Alertmanager instance the alert came from, matching all of the alert's labels exactly. The silence is created with the configured `author` and `comment`.
+
+```yaml
+acknowledgement:
+  duration: 15m
+  author: your-name
+  comment: "ACK! Acknowledged on %NOW%"
+```
+
+This pairs well with [kthxbye](https://github.com/prymitive/kthxbye), which automatically extends the silence while the alert keeps firing and lets it expire once the alert resolves.
 
 ## Multi-instance support
 
