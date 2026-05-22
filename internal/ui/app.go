@@ -41,9 +41,10 @@ const (
 )
 
 type displayItem struct {
-	kind  displayItemKind
-	alert alertmanager.Alert
-	group alertmanager.AlertGroup
+	kind   displayItemKind
+	alert  alertmanager.Alert      // used in modeDetail (current alert being viewed)
+	group  alertmanager.AlertGroup // used in modeGroupDetail
+	alerts []alertmanager.Alert    // matching alerts for this group
 }
 
 type alertsFetchedMsg struct {
@@ -73,8 +74,9 @@ type AppModel struct {
 	statusMsg       string // transient feedback shown in footer, cleared on next fetch
 	width           int
 	height          int
-	hiddenInstances map[string]bool
-	instanceCursor  int
+	hiddenInstances  map[string]bool
+	instanceCursor   int
+	groupDetailCursor int // cursor within group detail alert list
 }
 
 func New(cfg *config.Config) AppModel {
@@ -169,10 +171,7 @@ func (m AppModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case modeDetail:
 		return m.handleDetailKey(msg)
 	case modeGroupDetail:
-		if msg.Type == tea.KeyEsc || msg.String() == "q" {
-			m.mode = modeNormal
-		}
-		return m, nil
+		return m.handleGroupDetailKey(msg)
 	case modeHelp:
 		if msg.Type == tea.KeyEsc || msg.String() == "?" || msg.String() == "q" {
 			m.mode = modeNormal
@@ -218,12 +217,8 @@ func (m AppModel) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "enter":
 		if len(m.items) > 0 {
-			switch m.items[m.cursor].kind {
-			case displayItemGroup:
-				m.mode = modeGroupDetail
-			case displayItemAlert:
-				m.mode = modeDetail
-			}
+			m.groupDetailCursor = 0
+			m.mode = modeGroupDetail
 		}
 	case "/":
 		m.mode = modeFilter
@@ -234,10 +229,6 @@ func (m AppModel) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cmdInput.SetValue("")
 		m.cmdInput.Focus()
 		return m, textinput.Blink
-	case "a":
-		if len(m.items) > 0 && m.items[m.cursor].kind == displayItemAlert {
-			return m, acknowledgeAlert(m.items[m.cursor].alert, m.cfg)
-		}
 	case "r":
 		m.loading = true
 		return m, fetchAlerts(m.cfg)
@@ -298,13 +289,43 @@ func (m AppModel) handleCommandKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m AppModel) handleGroupDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if len(m.items) == 0 {
+		m.mode = modeNormal
+		return m, nil
+	}
+	alerts := m.items[m.cursor].alerts
+	switch msg.String() {
+	case "esc", "q":
+		m.groupDetailCursor = 0
+		m.mode = modeNormal
+	case "j", "down":
+		if m.groupDetailCursor < len(alerts)-1 {
+			m.groupDetailCursor++
+		}
+	case "k", "up":
+		if m.groupDetailCursor > 0 {
+			m.groupDetailCursor--
+		}
+	case "enter":
+		if len(alerts) > 0 {
+			m.mode = modeDetail
+		}
+	case "a":
+		if len(alerts) > 0 {
+			return m, acknowledgeAlert(alerts[m.groupDetailCursor], m.cfg)
+		}
+	}
+	return m, nil
+}
+
 func (m AppModel) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "q":
-		m.mode = modeNormal
+		m.mode = modeGroupDetail
 	case "a":
-		if m.cursor < len(m.items) && m.items[m.cursor].kind == displayItemAlert {
-			return m, acknowledgeAlert(m.items[m.cursor].alert, m.cfg)
+		if m.cursor < len(m.items) && len(m.items[m.cursor].alerts) > 0 {
+			return m, acknowledgeAlert(m.items[m.cursor].alerts[m.groupDetailCursor], m.cfg)
 		}
 	}
 	return m, nil
@@ -337,10 +358,11 @@ func (m *AppModel) applyFilter() {
 			matching = append(matching, a)
 		}
 		if len(matching) > 0 {
-			items = append(items, displayItem{kind: displayItemGroup, group: g})
-			for _, a := range matching {
-				items = append(items, displayItem{kind: displayItemAlert, alert: a})
-			}
+			items = append(items, displayItem{
+				kind:   displayItemGroup,
+				group:  g,
+				alerts: matching,
+			})
 		}
 	}
 	m.items = items
@@ -385,10 +407,10 @@ func (m AppModel) View() string {
 	if m.mode == modeInstances {
 		return m.renderInstancesOverlay()
 	}
-	if m.mode == modeDetail && len(m.items) > 0 && m.items[m.cursor].kind == displayItemAlert {
+	if m.mode == modeDetail && len(m.items) > 0 {
 		return m.renderDetailView()
 	}
-	if m.mode == modeGroupDetail && len(m.items) > 0 && m.items[m.cursor].kind == displayItemGroup {
+	if m.mode == modeGroupDetail && len(m.items) > 0 {
 		return m.renderGroupDetailView()
 	}
 	return m.renderMain()
@@ -433,14 +455,36 @@ func (m AppModel) renderLogo() string {
 
 func (m AppModel) renderDetailView() string {
 	header := m.renderHeader()
-	detail := renderDetail(m.items[m.cursor].alert, m.width)
+	alert := m.items[m.cursor].alerts[m.groupDetailCursor]
+	detail := renderDetail(alert, m.width)
 	return lipgloss.JoinVertical(lipgloss.Left, header, detail)
 }
 
 func (m AppModel) renderGroupDetailView() string {
 	header := m.renderHeader()
-	detail := renderGroupDetail(m.items[m.cursor].group, m.width)
-	return lipgloss.JoinVertical(lipgloss.Left, header, detail)
+	group := m.items[m.cursor]
+
+	keys := sortedKeys(group.group.Labels)
+	labelParts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		labelParts = append(labelParts, k+"="+group.group.Labels[k])
+	}
+	title := styleSectionHeader.Render("Group: " + strings.Join(labelParts, "  "))
+
+	groupItems := make([]displayItem, len(group.alerts))
+	for i, a := range group.alerts {
+		groupItems[i] = displayItem{kind: displayItemAlert, alert: a}
+	}
+
+	hint := styleFooter.Render("  <Enter> detail  <a> ack  <j/k> navigate  <ESC> back")
+	fixed := lipgloss.Height(header) + lipgloss.Height(title) + lipgloss.Height(hint)
+	tableH := m.height - fixed
+	if tableH < 0 {
+		tableH = 0
+	}
+	table := renderAlertsTable(groupItems, m.groupDetailCursor, m.width, tableH, false, m.spinner, m.cfg.Columns)
+
+	return lipgloss.JoinVertical(lipgloss.Left, header, title, table, hint)
 }
 
 func (m AppModel) renderHelp() string {

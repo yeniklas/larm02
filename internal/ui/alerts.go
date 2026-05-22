@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -54,13 +53,11 @@ func renderAlertsTable(items []displayItem, cursor, width, height int, loading b
 		return sb.String()
 	}
 
-	// Calculate how many rows we can display (height - 1 for the header).
 	maxRows := height - 1
 	if maxRows < 1 {
 		maxRows = 1
 	}
 
-	// Scroll window: keep cursor visible.
 	start := 0
 	if cursor >= maxRows {
 		start = cursor - maxRows + 1
@@ -72,20 +69,17 @@ func renderAlertsTable(items []displayItem, cursor, width, height int, loading b
 
 	for i := start; i < end; i++ {
 		item := items[i]
-		var line string
+		var row string
 		switch item.kind {
 		case displayItemGroup:
-			line = renderGroupHeader(item.group, width)
-			if i == cursor {
-				line = styleSelected.Width(width).Render(line)
-			}
+			row = formatGroupRow(item.group, item.alerts, width, extraCols)
 		case displayItemAlert:
-			row := formatRow(item.alert, width, extraCols)
-			line = "  " + row
-			if i == cursor {
-				line = styleSelected.Width(width).Render(line)
-				line = strings.Replace(line, "  ", " ▶", 1)
-			}
+			row = formatRow(item.alert, width, extraCols)
+		}
+		line := "  " + row
+		if i == cursor {
+			line = styleSelected.Width(width).Render(line)
+			line = strings.Replace(line, "  ", " ▶", 1)
 		}
 		sb.WriteString(line + "\n")
 	}
@@ -97,28 +91,29 @@ func renderAlertsTable(items []displayItem, cursor, width, height int, loading b
 	return sb.String()
 }
 
-func renderGroupHeader(g alertmanager.AlertGroup, width int) string {
-	keys := make([]string, 0, len(g.Labels))
-	for k := range g.Labels {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
+func formatGroupRow(g alertmanager.AlertGroup, alerts []alertmanager.Alert, _ int, extraCols []config.ColumnConfig) string {
+	name := g.Labels["alertname"]
+	alertname := truncate(fmt.Sprintf("%s (%d)", name, len(alerts)), columns[colAlertname].width)
+	severity := maxSeverity(alerts)
+	instance := groupInstance(alerts)
+	state := dominantState(alerts)
+	started := humanDuration(time.Since(oldestStart(alerts)))
 
-	parts := make([]string, 0, len(keys))
-	for _, k := range keys {
-		parts = append(parts, k+"="+g.Labels[k])
-	}
-	label := strings.Join(parts, "  ")
+	sev := severityStyle(severity).Width(columns[colSeverity].width).Render(truncate(severity, columns[colSeverity].width))
+	st := stateStyle(state).Width(columns[colState].width).Render(truncate(state, columns[colState].width))
 
-	const prefix = "─── "
-	const suffix = " "
-	// 2 for left indent
-	remaining := width - 2 - len(prefix) - len(label) - len(suffix)
-	if remaining < 2 {
-		remaining = 2
+	cells := []string{
+		lipgloss.NewStyle().Width(columns[colAlertname].width).Render(alertname),
+		sev,
+		lipgloss.NewStyle().Width(columns[colInstance].width).Render(truncate(instance, columns[colInstance].width)),
+		st,
+		lipgloss.NewStyle().Width(columns[colStarted].width).Render(started),
 	}
-	line := "  " + prefix + label + suffix + strings.Repeat("─", remaining)
-	return lipgloss.NewStyle().Foreground(colorAccent).Render(line)
+	for _, col := range extraCols {
+		val := truncate(g.Labels[col.Label], col.GetWidth())
+		cells = append(cells, lipgloss.NewStyle().Width(col.GetWidth()).Render(val))
+	}
+	return strings.Join(cells, " ")
 }
 
 func formatRow(a alertmanager.Alert, _ int, extraCols []config.ColumnConfig) string {
@@ -143,6 +138,68 @@ func formatRow(a alertmanager.Alert, _ int, extraCols []config.ColumnConfig) str
 		cells = append(cells, lipgloss.NewStyle().Width(col.GetWidth()).Render(val))
 	}
 	return strings.Join(cells, " ")
+}
+
+func maxSeverity(alerts []alertmanager.Alert) string {
+	order := map[string]int{"critical": 4, "warning": 3, "info": 2, "informational": 2}
+	best := ""
+	bestRank := -1
+	for _, a := range alerts {
+		sev := a.Labels["severity"]
+		if rank := order[sev]; rank > bestRank {
+			best = sev
+			bestRank = rank
+		}
+	}
+	if best == "" && len(alerts) > 0 {
+		best = alerts[0].Labels["severity"]
+	}
+	return best
+}
+
+func dominantState(alerts []alertmanager.Alert) string {
+	for _, a := range alerts {
+		if a.Status.State == "active" {
+			return "active"
+		}
+	}
+	for _, a := range alerts {
+		if a.Status.State != "suppressed" {
+			return a.Status.State
+		}
+	}
+	if len(alerts) > 0 {
+		return alerts[0].Status.State
+	}
+	return ""
+}
+
+func oldestStart(alerts []alertmanager.Alert) time.Time {
+	if len(alerts) == 0 {
+		return time.Time{}
+	}
+	t := alerts[0].StartsAt
+	for _, a := range alerts[1:] {
+		if a.StartsAt.Before(t) {
+			t = a.StartsAt
+		}
+	}
+	return t
+}
+
+func groupInstance(alerts []alertmanager.Alert) string {
+	if len(alerts) == 0 {
+		return ""
+	}
+	first := alerts[0].Instance
+	unique := map[string]struct{}{first: {}}
+	for _, a := range alerts[1:] {
+		unique[a.Instance] = struct{}{}
+	}
+	if len(unique) == 1 {
+		return first
+	}
+	return fmt.Sprintf("%d instances", len(unique))
 }
 
 func truncate(s string, max int) string {
