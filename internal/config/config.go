@@ -16,6 +16,7 @@ type Config struct {
 	Healthchecks    map[string][]string   `yaml:"healthchecks"`
 	Acknowledgement AcknowledgementConfig `yaml:"acknowledgement"`
 	Columns         []ColumnConfig        `yaml:"columns"`
+	Theme           Theme                 `yaml:"theme"`
 }
 
 // ColumnConfig defines an extra column in the alerts table backed by a label value.
@@ -127,6 +128,11 @@ func Load(path string) (*Config, error) {
 			return nil, fmt.Errorf("alertmanager %q has no url", am.Name)
 		}
 	}
+
+	if err := cfg.Theme.validate(); err != nil {
+		return nil, fmt.Errorf("config: %w", err)
+	}
+	fillThemeDefaults(&cfg.Theme)
 
 	return &cfg, nil
 }

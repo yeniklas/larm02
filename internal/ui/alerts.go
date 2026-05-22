@@ -36,18 +36,15 @@ func renderAlertsTable(alerts []alertmanager.Alert, cursor, width, height int, l
 		return strings.Repeat("\n", pad) + "  " + sp.View() + " Loading alerts…"
 	}
 
-	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("245")).Underline(true)
-	selectedBg := lipgloss.NewStyle().Background(lipgloss.Color("236"))
-
 	var sb strings.Builder
 
 	// header row
 	var headerCells []string
 	for _, col := range columns {
-		headerCells = append(headerCells, headerStyle.Width(col.width).Render(col.header))
+		headerCells = append(headerCells, styleHeaderCell.Width(col.width).Render(col.header))
 	}
 	for _, col := range extraCols {
-		headerCells = append(headerCells, headerStyle.Width(col.GetWidth()).Render(col.GetHeader()))
+		headerCells = append(headerCells, styleHeaderCell.Width(col.GetWidth()).Render(col.GetHeader()))
 	}
 	sb.WriteString("  " + strings.Join(headerCells, " ") + "\n")
 
@@ -78,9 +75,7 @@ func renderAlertsTable(alerts []alertmanager.Alert, cursor, width, height int, l
 		line := "  " + row
 
 		if i == cursor {
-			// highlight selected row
-			line = selectedBg.Width(width).Render(line)
-			// prefix cursor indicator
+			line = styleSelected.Width(width).Render(line)
 			line = strings.Replace(line, "  ", " ▶", 1)
 		}
 		sb.WriteString(line + "\n")
