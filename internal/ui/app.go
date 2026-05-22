@@ -437,11 +437,30 @@ func alertMatchesAllFilters(a alertmanager.Alert, filters []string) bool {
 
 func humanDuration(d time.Duration) string {
 	d = d.Round(time.Second)
-	if d < time.Minute {
+	switch {
+	case d < time.Minute:
 		return fmt.Sprintf("%ds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	case d < 7*24*time.Hour:
+		days := int(d.Hours()) / 24
+		if days == 1 {
+			return "1 day"
+		}
+		return fmt.Sprintf("%d days", days)
+	case d < 30*24*time.Hour:
+		weeks := int(d.Hours()) / (24 * 7)
+		if weeks == 1 {
+			return "1 week"
+		}
+		return fmt.Sprintf("%d weeks", weeks)
+	default:
+		months := int(d.Hours()) / (24 * 30)
+		if months == 1 {
+			return "1 month"
+		}
+		return fmt.Sprintf("%d months", months)
 	}
-	if d < time.Hour {
-		return fmt.Sprintf("%dm%ds", int(d.Minutes()), int(d.Seconds())%60)
-	}
-	return fmt.Sprintf("%dh%dm", int(d.Hours()), int(d.Minutes())%60)
 }
