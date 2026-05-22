@@ -12,6 +12,7 @@ import (
 type Config struct {
 	Alertmanagers   []AlertmanagerConfig `yaml:"alertmanagers"`
 	RefreshInterval duration             `yaml:"refresh_interval"`
+	Healthchecks    map[string][]string  `yaml:"healthchecks"`
 }
 
 type AlertmanagerConfig struct {

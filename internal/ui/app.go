@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -33,19 +34,20 @@ type tickMsg time.Time
 
 // AppModel is the root bubbletea model.
 type AppModel struct {
-	cfg         *config.Config
-	alerts      []alertmanager.Alert
-	filtered    []alertmanager.Alert
-	cursor      int
-	mode        mode
-	filterInput textinput.Model
-	cmdInput    textinput.Model
-	spinner     spinner.Model
-	loading     bool
-	lastRefresh time.Time
-	errs        []error
-	width       int
-	height      int
+	cfg           *config.Config
+	alerts        []alertmanager.Alert
+	filtered      []alertmanager.Alert
+	failingChecks []string // healthcheck names with no matching alerts
+	cursor        int
+	mode          mode
+	filterInput   textinput.Model
+	cmdInput      textinput.Model
+	spinner       spinner.Model
+	loading       bool
+	lastRefresh   time.Time
+	errs          []error
+	width         int
+	height        int
 }
 
 func New(cfg *config.Config) AppModel {
@@ -97,7 +99,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case alertsFetchedMsg:
 		m.loading = false
 		m.lastRefresh = time.Now()
-		m.alerts = msg.alerts
+		m.alerts, m.failingChecks = partitionHealthchecks(msg.alerts, m.cfg.Healthchecks)
 		m.errs = msg.errs
 		m.applyFilter()
 		if m.cursor >= len(m.filtered) && m.cursor > 0 {
@@ -333,15 +335,24 @@ func (m AppModel) renderBreadcrumb() string {
 	if filter != "" {
 		crumb += "  " + styleFilter.Render("(filter: "+filter+")")
 	}
-	errStr := ""
+
+	var warnings []string
+	for _, name := range m.failingChecks {
+		warnings = append(warnings, styleError.Render("⚠ healthcheck: "+name))
+	}
 	if len(m.errs) > 0 {
 		msgs := make([]string, len(m.errs))
 		for i, e := range m.errs {
 			msgs[i] = e.Error()
 		}
-		errStr = "  " + styleError.Render("⚠ "+strings.Join(msgs, "; "))
+		warnings = append(warnings, styleError.Render("⚠ "+strings.Join(msgs, "; ")))
 	}
-	return styleBreadcrumb.Render(crumb + errStr)
+
+	out := crumb
+	if len(warnings) > 0 {
+		out += "  " + strings.Join(warnings, "  ")
+	}
+	return styleBreadcrumb.Render(out)
 }
 
 func (m AppModel) renderFooter() string {
@@ -377,6 +388,51 @@ func scheduleTick(d time.Duration) tea.Cmd {
 	return tea.Tick(d, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
+}
+
+// partitionHealthchecks separates alerts matched by healthcheck filter sets from
+// regular alerts. An alert is hidden from the main list if it matches ALL filters
+// in any one healthcheck set. A check is "failing" when no alerts match its filters.
+func partitionHealthchecks(alerts []alertmanager.Alert, checks map[string][]string) (regular []alertmanager.Alert, failing []string) {
+	if len(checks) == 0 {
+		return alerts, nil
+	}
+
+	matched := make(map[string]bool, len(checks))
+	for name := range checks {
+		matched[name] = false
+	}
+
+	for _, a := range alerts {
+		isHealthcheck := false
+		for name, filters := range checks {
+			if alertMatchesAllFilters(a, filters) {
+				matched[name] = true
+				isHealthcheck = true
+			}
+		}
+		if !isHealthcheck {
+			regular = append(regular, a)
+		}
+	}
+
+	for name, ok := range matched {
+		if !ok {
+			failing = append(failing, name)
+		}
+	}
+	sort.Strings(failing)
+	return regular, failing
+}
+
+// alertMatchesAllFilters returns true when the alert satisfies every filter (AND logic).
+func alertMatchesAllFilters(a alertmanager.Alert, filters []string) bool {
+	for _, f := range filters {
+		if !matchesFilter(a, f) {
+			return false
+		}
+	}
+	return true
 }
 
 func humanDuration(d time.Duration) string {

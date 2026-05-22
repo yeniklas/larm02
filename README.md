@@ -37,6 +37,22 @@ larm02 --config /path/to/config.yaml
 | `alertmanagers[].name` | — | Display name shown in the header |
 | `alertmanagers[].url` | — | Base URL of the Alertmanager instance |
 | `refresh_interval` | `30s` | How often to poll for new alerts |
+| `healthchecks` | — | Named watchdog filter sets (see below) |
+
+### Healthchecks (watchdog alerts)
+
+`healthchecks` is a map from a display name to a list of filters. larm02 expects at least one active alert matching **all** filters in each set. If a set has no matches, a warning is shown in the UI. Alerts matched by a healthcheck are hidden from the main alert list.
+
+This is designed for use with a [Dead Man's Switch](https://en.wikipedia.org/wiki/Dead_man%27s_switch) alert that fires constantly to confirm the alerting pipeline is alive.
+
+```yaml
+healthchecks:
+  watchdog:
+    - alertname=Watchdog
+  infra-watchdog:
+    - alertname=Watchdog
+    - severity=none
+```
 
 ## Usage
 
