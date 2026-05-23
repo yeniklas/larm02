@@ -36,11 +36,27 @@ func renderAlertsTable(items []displayItem, cursor, width, height int, loading b
 		return strings.Repeat("\n", pad) + "  " + sp.View() + " Loading alerts…"
 	}
 
+	// Compute alertname column width from actual content.
+	nameWidth := len("ALERTNAME")
+	for _, item := range items {
+		var n string
+		switch item.kind {
+		case displayItemGroup:
+			n = fmt.Sprintf("%s (%d)", item.group.Labels["alertname"], len(item.alerts))
+		case displayItemAlert:
+			n = item.alert.Labels["alertname"]
+		}
+		if len(n) > nameWidth {
+			nameWidth = len(n)
+		}
+	}
+
 	var sb strings.Builder
 
 	// header row
 	var headerCells []string
-	for _, col := range columns {
+	headerCells = append(headerCells, styleHeaderCell.Width(nameWidth).Render(columns[colAlertname].header))
+	for _, col := range columns[1:] {
 		headerCells = append(headerCells, styleHeaderCell.Width(col.width).Render(col.header))
 	}
 	for _, col := range extraCols {
@@ -72,9 +88,9 @@ func renderAlertsTable(items []displayItem, cursor, width, height int, loading b
 		var row string
 		switch item.kind {
 		case displayItemGroup:
-			row = formatGroupRow(item.group, item.alerts, width, extraCols)
+			row = formatGroupRow(item.group, item.alerts, nameWidth, extraCols)
 		case displayItemAlert:
-			row = formatRow(item.alert, width, extraCols)
+			row = formatRow(item.alert, nameWidth, extraCols)
 		}
 		line := "  " + row
 		if i == cursor {
@@ -91,9 +107,9 @@ func renderAlertsTable(items []displayItem, cursor, width, height int, loading b
 	return sb.String()
 }
 
-func formatGroupRow(g alertmanager.AlertGroup, alerts []alertmanager.Alert, _ int, extraCols []config.ColumnConfig) string {
+func formatGroupRow(g alertmanager.AlertGroup, alerts []alertmanager.Alert, nameWidth int, extraCols []config.ColumnConfig) string {
 	name := g.Labels["alertname"]
-	alertname := truncate(fmt.Sprintf("%s (%d)", name, len(alerts)), columns[colAlertname].width)
+	alertname := truncate(fmt.Sprintf("%s (%d)", name, len(alerts)), nameWidth)
 	severity := maxSeverity(alerts)
 	instance := groupInstance(alerts)
 	state := dominantState(alerts)
@@ -103,7 +119,7 @@ func formatGroupRow(g alertmanager.AlertGroup, alerts []alertmanager.Alert, _ in
 	st := stateStyle(state).Width(columns[colState].width).Render(truncate(state, columns[colState].width))
 
 	cells := []string{
-		lipgloss.NewStyle().Width(columns[colAlertname].width).Render(alertname),
+		lipgloss.NewStyle().Width(nameWidth).Render(alertname),
 		sev,
 		lipgloss.NewStyle().Width(columns[colInstance].width).Render(truncate(instance, columns[colInstance].width)),
 		st,
@@ -116,8 +132,8 @@ func formatGroupRow(g alertmanager.AlertGroup, alerts []alertmanager.Alert, _ in
 	return strings.Join(cells, " ")
 }
 
-func formatRow(a alertmanager.Alert, _ int, extraCols []config.ColumnConfig) string {
-	alertname := truncate(a.Labels["alertname"], columns[colAlertname].width)
+func formatRow(a alertmanager.Alert, nameWidth int, extraCols []config.ColumnConfig) string {
+	alertname := truncate(a.Labels["alertname"], nameWidth)
 	severity := a.Labels["severity"]
 	instance := truncate(a.Instance, columns[colInstance].width)
 	state := a.Status.State
@@ -127,7 +143,7 @@ func formatRow(a alertmanager.Alert, _ int, extraCols []config.ColumnConfig) str
 	st := stateStyle(state).Width(columns[colState].width).Render(truncate(state, columns[colState].width))
 
 	cells := []string{
-		lipgloss.NewStyle().Width(columns[colAlertname].width).Render(alertname),
+		lipgloss.NewStyle().Width(nameWidth).Render(alertname),
 		sev,
 		lipgloss.NewStyle().Width(columns[colInstance].width).Render(instance),
 		st,
