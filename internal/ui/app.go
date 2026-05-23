@@ -92,7 +92,7 @@ func New(cfg *config.Config) AppModel {
 	fi.CharLimit = 200
 
 	ci := textinput.New()
-	ci.Placeholder = "alerts, quit"
+	ci.Placeholder = "quit"
 	ci.CharLimit = 100
 
 	sp := spinner.New()
@@ -310,11 +310,8 @@ func (m AppModel) handleCommandKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cmdInput.SetValue("")
 		m.cmdInput.Blur()
 		m.mode = modeNormal
-		switch cmd {
-		case "quit", "q":
+		if cmd == "quit" || cmd == "q" {
 			return m, tea.Quit
-		case "alerts":
-			// already on alerts view
 		}
 		return m, nil
 	case tea.KeyEsc:
@@ -483,11 +480,6 @@ func matchesFilter(a alertmanager.Alert, query string) bool {
 		key := strings.TrimSpace(parts[0])
 		val := strings.TrimSpace(parts[1])
 		substring := false
-		if strings.HasPrefix(key, "~") {
-			key = key[1:]
-			substring = true
-		}
-		// support key=~value (regex-lite substring)
 		if strings.HasPrefix(val, "~") {
 			val = val[1:]
 			substring = true
