@@ -423,7 +423,7 @@ func (m *AppModel) applyFilter() {
 			if query != "" && !matchesFilter(a, query) {
 				continue
 			}
-			val := a.Labels[activeLabel]
+			val := alertSectionValue(a, activeLabel)
 			if val == "" {
 				val = "(none)"
 			}
@@ -466,6 +466,13 @@ func (m *AppModel) applyFilter() {
 		}
 	}
 	m.items = items
+}
+
+func alertSectionValue(a alertmanager.Alert, label string) string {
+	if label == "@instance" {
+		return a.Instance
+	}
+	return a.Labels[label]
 }
 
 // matchesFilter checks if alert matches a simple filter expression.

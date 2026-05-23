@@ -25,7 +25,7 @@ alertmanagers:
     hidden: true          # start hidden; still counted in header
 refresh_interval: 30s
 group_labels:
-  - instance
+  - "@instance"   # virtual label: resolves to the AM instance name
   - severity
 columns:
   - label: team
@@ -46,7 +46,7 @@ larm02 --config /path/to/config.yaml
 | `alertmanagers[].url` | — | Base URL of the Alertmanager instance |
 | `alertmanagers[].hidden` | `false` | Start with this instance hidden from the alert list |
 | `refresh_interval` | `30s` | How often to poll for new alerts |
-| `group_labels` | — | Labels available for section grouping (cycled with `g`) |
+| `group_labels` | — | Labels available for section grouping (cycled with `g`); use `@instance` for the Alertmanager instance name |
 | `columns` | — | Extra columns to show in the alert table, backed by label values |
 | `columns[].label` | — | Alert label to display |
 | `columns[].header` | uppercase label | Column header text |
@@ -106,6 +106,8 @@ The main list shows one row per Alertmanager alert group. Each row displays the 
 ### Section grouping
 
 Press `g` to cycle through the labels configured in `group_labels`. When a label is active, groups are nested under section headers based on that label's value in each alert. Sections can be collapsed or expanded with `Space` or `Enter`. Alerts whose labels do not include the active label are collected under a `(none)` section at the bottom.
+
+Labels prefixed with `@` are virtual. `@instance` resolves to the Alertmanager instance name (the `name` field in config), making it possible to split the alert list by AM instance — similar to Karma's `@cluster` grid.
 
 The active grouping label is shown in the breadcrumb line. Press `g` once more past the last configured label to return to the flat list.
 
