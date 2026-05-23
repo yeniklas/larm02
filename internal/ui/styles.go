@@ -97,8 +97,9 @@ func ApplyTheme(t config.Theme) {
 		Foreground(fg)
 
 	styleSectionHeader = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(colorAccent).
+		Foreground(colorMuted).
+		Background(hdrBg).
+		PaddingLeft(1).
 		MarginTop(1)
 
 	styleHeaderCell = lipgloss.NewStyle().

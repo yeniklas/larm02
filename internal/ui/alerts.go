@@ -176,14 +176,8 @@ func renderSectionHeader(item displayItem, width int) string {
 		noun = "group"
 	}
 	label := fmt.Sprintf("%s=%s", item.sectionLabel, item.sectionValue)
-	mid := fmt.Sprintf(" %s  %s  (%d %s) ", arrow, label, item.groupCount, noun)
-	fillLen := width - len(mid) - 2
-	if fillLen < 0 {
-		fillLen = 0
-	}
-	half := fillLen / 2
-	line := "  " + strings.Repeat("═", half) + mid + strings.Repeat("═", fillLen-half)
-	return lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render(line)
+	text := fmt.Sprintf("%s  %s  (%d %s)", arrow, label, item.groupCount, noun)
+	return styleSectionHeader.Width(width).Render(text)
 }
 
 func maxSeverity(alerts []alertmanager.Alert) string {
