@@ -15,6 +15,8 @@ var helpBindings = [][2]string{
 	{":", "command mode"},
 	{"a", "acknowledge alert"},
 	{"r", "refresh now"},
+	{"g", "cycle group label"},
+	{"Space", "collapse/expand section"},
 	{"i", "instance visibility"},
 	{"?", "toggle help"},
 	{"q", "quit"},

@@ -85,17 +85,27 @@ func renderAlertsTable(items []displayItem, cursor, width, height int, loading b
 
 	for i := start; i < end; i++ {
 		item := items[i]
-		var row string
+		var line string
 		switch item.kind {
+		case displayItemSection:
+			line = renderSectionHeader(item, width)
+			if i == cursor {
+				line = styleSelected.Width(width).Render(line)
+			}
 		case displayItemGroup:
-			row = formatGroupRow(item.group, item.alerts, nameWidth, extraCols)
+			row := formatGroupRow(item.group, item.alerts, nameWidth, extraCols)
+			line = "  " + row
+			if i == cursor {
+				line = styleSelected.Width(width).Render(line)
+				line = strings.Replace(line, "  ", " ▶", 1)
+			}
 		case displayItemAlert:
-			row = formatRow(item.alert, nameWidth, extraCols)
-		}
-		line := "  " + row
-		if i == cursor {
-			line = styleSelected.Width(width).Render(line)
-			line = strings.Replace(line, "  ", " ▶", 1)
+			row := formatRow(item.alert, nameWidth, extraCols)
+			line = "  " + row
+			if i == cursor {
+				line = styleSelected.Width(width).Render(line)
+				line = strings.Replace(line, "  ", " ▶", 1)
+			}
 		}
 		sb.WriteString(line + "\n")
 	}
@@ -154,6 +164,26 @@ func formatRow(a alertmanager.Alert, nameWidth int, extraCols []config.ColumnCon
 		cells = append(cells, lipgloss.NewStyle().Width(col.GetWidth()).Render(val))
 	}
 	return strings.Join(cells, " ")
+}
+
+func renderSectionHeader(item displayItem, width int) string {
+	arrow := "▼"
+	if item.collapsed {
+		arrow = "▶"
+	}
+	noun := "groups"
+	if item.groupCount == 1 {
+		noun = "group"
+	}
+	label := fmt.Sprintf("%s=%s", item.sectionLabel, item.sectionValue)
+	mid := fmt.Sprintf(" %s  %s  (%d %s) ", arrow, label, item.groupCount, noun)
+	fillLen := width - len(mid) - 2
+	if fillLen < 0 {
+		fillLen = 0
+	}
+	half := fillLen / 2
+	line := "  " + strings.Repeat("═", half) + mid + strings.Repeat("═", fillLen-half)
+	return lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render(line)
 }
 
 func maxSeverity(alerts []alertmanager.Alert) string {

@@ -16,6 +16,7 @@ type Config struct {
 	Healthchecks    map[string][]string   `yaml:"healthchecks"`
 	Acknowledgement AcknowledgementConfig `yaml:"acknowledgement"`
 	Columns         []ColumnConfig        `yaml:"columns"`
+	GroupLabels     []string              `yaml:"group_labels"`
 	Theme           Theme                 `yaml:"theme"`
 	DisableLogo     bool                  `yaml:"disable_logo"`
 }

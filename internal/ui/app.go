@@ -38,13 +38,18 @@ type displayItemKind int
 const (
 	displayItemAlert displayItemKind = iota
 	displayItemGroup
+	displayItemSection
 )
 
 type displayItem struct {
-	kind   displayItemKind
-	alert  alertmanager.Alert      // used in modeDetail (current alert being viewed)
-	group  alertmanager.AlertGroup // used in modeGroupDetail
-	alerts []alertmanager.Alert    // matching alerts for this group
+	kind         displayItemKind
+	alert        alertmanager.Alert
+	group        alertmanager.AlertGroup
+	alerts       []alertmanager.Alert
+	sectionLabel string
+	sectionValue string
+	groupCount   int
+	collapsed    bool
 }
 
 type alertsFetchedMsg struct {
@@ -74,9 +79,11 @@ type AppModel struct {
 	statusMsg       string // transient feedback shown in footer, cleared on next fetch
 	width           int
 	height          int
-	hiddenInstances  map[string]bool
-	instanceCursor   int
+	hiddenInstances   map[string]bool
+	instanceCursor    int
 	groupDetailCursor int // cursor within group detail alert list
+	groupLabelIdx     int             // -1 = off, 0..n-1 = active label index
+	collapsedSections map[string]bool // keyed by sectionValue; true = collapsed
 }
 
 func New(cfg *config.Config) AppModel {
@@ -100,12 +107,14 @@ func New(cfg *config.Config) AppModel {
 	}
 
 	return AppModel{
-		cfg:             cfg,
-		filterInput:     fi,
-		cmdInput:        ci,
-		spinner:         sp,
-		loading:         true,
-		hiddenInstances: hidden,
+		cfg:               cfg,
+		filterInput:       fi,
+		cmdInput:          ci,
+		spinner:           sp,
+		loading:           true,
+		hiddenInstances:   hidden,
+		groupLabelIdx:     -1,
+		collapsedSections: make(map[string]bool),
 	}
 }
 
@@ -217,8 +226,38 @@ func (m AppModel) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "enter":
 		if len(m.items) > 0 {
-			m.groupDetailCursor = 0
-			m.mode = modeGroupDetail
+			switch m.items[m.cursor].kind {
+			case displayItemSection:
+				val := m.items[m.cursor].sectionValue
+				m.collapsedSections[val] = !m.collapsedSections[val]
+				m.applyFilter()
+				if m.cursor >= len(m.items) {
+					m.cursor = max(0, len(m.items)-1)
+				}
+			case displayItemGroup:
+				m.groupDetailCursor = 0
+				m.mode = modeGroupDetail
+			}
+		}
+	case "g":
+		if len(m.cfg.GroupLabels) > 0 {
+			if m.groupLabelIdx >= len(m.cfg.GroupLabels)-1 {
+				m.groupLabelIdx = -1
+			} else {
+				m.groupLabelIdx++
+			}
+			m.collapsedSections = make(map[string]bool)
+			m.applyFilter()
+			m.cursor = 0
+		}
+	case " ":
+		if len(m.items) > 0 && m.items[m.cursor].kind == displayItemSection {
+			val := m.items[m.cursor].sectionValue
+			m.collapsedSections[val] = !m.collapsedSections[val]
+			m.applyFilter()
+			if m.cursor >= len(m.items) {
+				m.cursor = max(0, len(m.items)-1)
+			}
 		}
 	case "/":
 		m.mode = modeFilter
@@ -334,20 +373,49 @@ func (m AppModel) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // applyFilter rebuilds m.items from m.groups, applying the current filter query,
 // hidden instances, and healthcheck exclusions.
 func (m *AppModel) applyFilter() {
-	// Build set of regular (non-healthcheck) alert keys from m.alerts.
 	regularSet := make(map[string]struct{}, len(m.alerts))
 	for _, a := range m.alerts {
 		regularSet[a.Instance+"/"+a.Fingerprint] = struct{}{}
 	}
-
 	query := strings.TrimSpace(m.filterInput.Value())
 
-	var items []displayItem
+	if m.groupLabelIdx < 0 {
+		var items []displayItem
+		for _, g := range m.groups {
+			var matching []alertmanager.Alert
+			for _, a := range g.Alerts {
+				if _, ok := regularSet[a.Instance+"/"+a.Fingerprint]; !ok {
+					continue
+				}
+				if m.hiddenInstances[a.Instance] {
+					continue
+				}
+				if query != "" && !matchesFilter(a, query) {
+					continue
+				}
+				matching = append(matching, a)
+			}
+			if len(matching) > 0 {
+				items = append(items, displayItem{kind: displayItemGroup, group: g, alerts: matching})
+			}
+		}
+		m.items = items
+		return
+	}
+
+	// Section-grouping mode.
+	activeLabel := m.cfg.GroupLabels[m.groupLabelIdx]
+	type groupEntry struct {
+		group  alertmanager.AlertGroup
+		alerts []alertmanager.Alert
+	}
+	sections := make(map[string][]groupEntry)
+
 	for _, g := range m.groups {
-		var matching []alertmanager.Alert
+		byVal := make(map[string][]alertmanager.Alert)
 		for _, a := range g.Alerts {
 			if _, ok := regularSet[a.Instance+"/"+a.Fingerprint]; !ok {
-				continue // healthcheck alert
+				continue
 			}
 			if m.hiddenInstances[a.Instance] {
 				continue
@@ -355,14 +423,46 @@ func (m *AppModel) applyFilter() {
 			if query != "" && !matchesFilter(a, query) {
 				continue
 			}
-			matching = append(matching, a)
+			val := a.Labels[activeLabel]
+			if val == "" {
+				val = "(none)"
+			}
+			byVal[val] = append(byVal[val], a)
 		}
-		if len(matching) > 0 {
-			items = append(items, displayItem{
-				kind:   displayItemGroup,
-				group:  g,
-				alerts: matching,
-			})
+		for val, alerts := range byVal {
+			sections[val] = append(sections[val], groupEntry{group: g, alerts: alerts})
+		}
+	}
+
+	sectionValues := make([]string, 0, len(sections))
+	for v := range sections {
+		sectionValues = append(sectionValues, v)
+	}
+	sort.Slice(sectionValues, func(i, j int) bool {
+		if sectionValues[i] == "(none)" {
+			return false
+		}
+		if sectionValues[j] == "(none)" {
+			return true
+		}
+		return sectionValues[i] < sectionValues[j]
+	})
+
+	var items []displayItem
+	for _, val := range sectionValues {
+		entries := sections[val]
+		collapsed := m.collapsedSections[val]
+		items = append(items, displayItem{
+			kind:         displayItemSection,
+			sectionLabel: activeLabel,
+			sectionValue: val,
+			groupCount:   len(entries),
+			collapsed:    collapsed,
+		})
+		if !collapsed {
+			for _, e := range entries {
+				items = append(items, displayItem{kind: displayItemGroup, group: e.group, alerts: e.alerts})
+			}
 		}
 	}
 	m.items = items
@@ -525,6 +625,9 @@ func (m AppModel) renderBreadcrumb() string {
 	if filter != "" {
 		crumb += "  " + styleFilter.Render("(filter: "+filter+")")
 	}
+	if m.groupLabelIdx >= 0 && m.groupLabelIdx < len(m.cfg.GroupLabels) {
+		crumb += "  " + styleFilter.Render("(grouped by: "+m.cfg.GroupLabels[m.groupLabelIdx]+")")
+	}
 
 	var warnings []string
 	for _, name := range m.failingChecks {
@@ -566,6 +669,7 @@ func (m AppModel) renderFooter() string {
 		hint("Enter", "detail"),
 		hint("a", "ack"),
 		hint("r", "refresh"),
+		hint("g", "group"),
 		hint("i", "instances"),
 		hint("?", "help"),
 		hint("q", "quit"),
