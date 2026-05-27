@@ -21,7 +21,7 @@ var httpClient = &http.Client{Timeout: 10 * time.Second}
 // merged across instances; alerts within a merged group are deduplicated by
 // instance+fingerprint. Errors from individual instances are collected and
 // returned alongside any groups that did succeed.
-func FetchAll(ctx context.Context, cfg *config.Config) ([]AlertGroup, []error) {
+func FetchAll(ctx context.Context, cfg *config.Config) ([]AlertGroup, map[string]error) {
 	type result struct {
 		groups []AlertGroup
 		err    error
@@ -47,11 +47,11 @@ func FetchAll(ctx context.Context, cfg *config.Config) ([]AlertGroup, []error) {
 
 	byKey := make(map[string]*mergedGroup)
 	var order []string
-	var errs []error
+	instErrs := make(map[string]error)
 
-	for _, r := range results {
+	for i, r := range results {
 		if r.err != nil {
-			errs = append(errs, r.err)
+			instErrs[cfg.Alertmanagers[i].Name] = r.err
 			continue
 		}
 		for _, g := range r.groups {
@@ -87,7 +87,7 @@ func FetchAll(ctx context.Context, cfg *config.Config) ([]AlertGroup, []error) {
 	for _, key := range order {
 		merged = append(merged, byKey[key].group)
 	}
-	return merged, errs
+	return merged, instErrs
 }
 
 // groupKey returns a canonical string key for a set of group labels.

@@ -54,8 +54,8 @@ type displayItem struct {
 }
 
 type alertsFetchedMsg struct {
-	groups []alertmanager.AlertGroup
-	errs   []error
+	groups   []alertmanager.AlertGroup
+	instErrs map[string]error
 }
 
 type silencePostedMsg struct{ err error }
@@ -76,8 +76,9 @@ type AppModel struct {
 	spinner         spinner.Model
 	loading         bool
 	lastRefresh     time.Time
-	errs            []error
-	statusMsg       string // transient feedback shown in footer, cleared on next fetch
+	instErrs        map[string]error // per-instance fetch errors; nil until first fetch completes
+	instUnhealthy   map[string]bool  // per-instance healthcheck failures
+	statusMsg       string           // transient feedback shown in footer, cleared on next fetch
 	width           int
 	height          int
 	hiddenInstances   map[string]bool
@@ -148,8 +149,10 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = false
 		m.lastRefresh = time.Now()
 		m.groups = msg.groups
-		m.alerts, m.failingChecks = partitionHealthchecks(flattenGroups(msg.groups), m.cfg.Healthchecks)
-		m.errs = msg.errs
+		all := flattenGroups(msg.groups)
+		m.alerts, m.failingChecks = partitionHealthchecks(all, m.cfg.Healthchecks)
+		m.instErrs = msg.instErrs
+		m.instUnhealthy = instancesFailingHealthchecks(all, m.cfg.Healthchecks, m.cfg.Alertmanagers)
 		m.statusMsg = ""
 		m.applyFilter()
 		if m.cursor >= len(m.items) && m.cursor > 0 {
@@ -609,9 +612,16 @@ func (m AppModel) renderHeader() string {
 	counts := countActiveAlertsByInstance(m.alerts)
 	left := styleHeader.Render("larm02")
 	for _, am := range m.cfg.Alertmanagers {
-		s := styleInstance
-		if m.hiddenInstances[am.Name] {
+		var s lipgloss.Style
+		switch {
+		case m.hiddenInstances[am.Name]:
 			s = styleInstanceHidden
+		case m.instErrs == nil:
+			s = styleInstance
+		case m.instErrs[am.Name] != nil || m.instUnhealthy[am.Name]:
+			s = styleInstanceBad
+		default:
+			s = styleInstanceGood
 		}
 		left += s.Render(fmt.Sprintf("%s (%d)", am.Name, counts[am.Name]))
 	}
@@ -644,13 +654,6 @@ func (m AppModel) renderBreadcrumb() string {
 	var warnings []string
 	for _, name := range m.failingChecks {
 		warnings = append(warnings, styleError.Render("⚠ healthcheck: "+name))
-	}
-	if len(m.errs) > 0 {
-		msgs := make([]string, len(m.errs))
-		for i, e := range m.errs {
-			msgs[i] = e.Error()
-		}
-		warnings = append(warnings, styleError.Render("⚠ "+strings.Join(msgs, "; ")))
 	}
 
 	out := crumb
@@ -702,8 +705,8 @@ func acknowledgeAlert(alert alertmanager.Alert, cfg *config.Config) tea.Cmd {
 
 func fetchAlerts(cfg *config.Config) tea.Cmd {
 	return func() tea.Msg {
-		groups, errs := alertmanager.FetchAll(context.Background(), cfg)
-		return alertsFetchedMsg{groups: groups, errs: errs}
+		groups, instErrs := alertmanager.FetchAll(context.Background(), cfg)
+		return alertsFetchedMsg{groups: groups, instErrs: instErrs}
 	}
 }
 
@@ -754,6 +757,31 @@ func partitionHealthchecks(alerts []alertmanager.Alert, checks map[string][]stri
 	}
 	sort.Strings(failing)
 	return regular, failing
+}
+
+// instancesFailingHealthchecks returns a set of instance names for which at least
+// one healthcheck has no matching alert. Returns nil when no checks are configured.
+func instancesFailingHealthchecks(alerts []alertmanager.Alert, checks map[string][]string, ams []config.AlertmanagerConfig) map[string]bool {
+	if len(checks) == 0 {
+		return nil
+	}
+	unhealthy := make(map[string]bool)
+	for _, am := range ams {
+		for _, filters := range checks {
+			found := false
+			for _, a := range alerts {
+				if a.Instance == am.Name && alertMatchesAllFilters(a, filters) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				unhealthy[am.Name] = true
+				break
+			}
+		}
+	}
+	return unhealthy
 }
 
 // alertMatchesAllFilters returns true when the alert satisfies every filter (AND logic).

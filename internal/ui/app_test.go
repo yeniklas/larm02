@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/yeniklas/larm02/internal/alertmanager"
+	"github.com/yeniklas/larm02/internal/config"
 )
 
 func alert(labels map[string]string) alertmanager.Alert {
@@ -181,6 +182,45 @@ func TestPartitionHealthchecks_FailingSorted(t *testing.T) {
 		if failing[i] < failing[i-1] {
 			t.Errorf("failing checks not sorted: %v", failing)
 		}
+	}
+}
+
+// --- instancesFailingHealthchecks ---
+
+func TestInstancesFailingHealthchecks_NoChecks(t *testing.T) {
+	ams := []config.AlertmanagerConfig{{Name: "prod"}}
+	result := instancesFailingHealthchecks(nil, nil, ams)
+	if result != nil {
+		t.Errorf("expected nil when no checks configured, got %v", result)
+	}
+}
+
+func TestInstancesFailingHealthchecks_AllHealthy(t *testing.T) {
+	ams := []config.AlertmanagerConfig{{Name: "prod"}, {Name: "staging"}}
+	alerts := []alertmanager.Alert{
+		{Labels: map[string]string{"alertname": "Watchdog"}, Instance: "prod", Status: alertmanager.AlertStatus{State: "active"}, Annotations: map[string]string{}},
+		{Labels: map[string]string{"alertname": "Watchdog"}, Instance: "staging", Status: alertmanager.AlertStatus{State: "active"}, Annotations: map[string]string{}},
+	}
+	checks := map[string][]string{"watchdog": {"alertname=Watchdog"}}
+	result := instancesFailingHealthchecks(alerts, checks, ams)
+	if len(result) != 0 {
+		t.Errorf("expected all instances healthy, got unhealthy: %v", result)
+	}
+}
+
+func TestInstancesFailingHealthchecks_OneUnhealthy(t *testing.T) {
+	ams := []config.AlertmanagerConfig{{Name: "prod"}, {Name: "staging"}}
+	alerts := []alertmanager.Alert{
+		{Labels: map[string]string{"alertname": "Watchdog"}, Instance: "prod", Status: alertmanager.AlertStatus{State: "active"}, Annotations: map[string]string{}},
+		// staging has no Watchdog
+	}
+	checks := map[string][]string{"watchdog": {"alertname=Watchdog"}}
+	result := instancesFailingHealthchecks(alerts, checks, ams)
+	if !result["staging"] {
+		t.Error("expected staging to be unhealthy")
+	}
+	if result["prod"] {
+		t.Error("expected prod to be healthy")
 	}
 }
 
