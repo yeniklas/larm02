@@ -19,6 +19,7 @@ type Config struct {
 	GroupLabels     []string              `yaml:"group_labels"`
 	Theme           Theme                 `yaml:"theme"`
 	DisableLogo     bool                  `yaml:"disable_logo"`
+	DefaultFilter   string                `yaml:"default_filter"`
 }
 
 // ColumnConfig defines an extra column in the alerts table backed by a label value.

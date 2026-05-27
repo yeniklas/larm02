@@ -91,6 +91,7 @@ func New(cfg *config.Config) AppModel {
 	fi := textinput.New()
 	fi.Placeholder = "severity=critical"
 	fi.CharLimit = 200
+	fi.SetValue(cfg.DefaultFilter)
 
 	ci := textinput.New()
 	ci.Placeholder = "quit"
