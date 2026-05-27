@@ -76,8 +76,9 @@ type AppModel struct {
 	spinner         spinner.Model
 	loading         bool
 	lastRefresh     time.Time
-	instErrs        map[string]error // per-instance fetch errors; nil until first fetch completes
-	instUnhealthy   map[string]bool  // per-instance healthcheck failures
+	fetchingInstances map[string]bool  // instances with an in-flight fetch
+	instErrs          map[string]error // per-instance fetch errors
+	instUnhealthy     map[string]bool  // per-instance healthcheck failures
 	statusMsg       string           // transient feedback shown in footer, cleared on next fetch
 	width           int
 	height          int
@@ -103,10 +104,12 @@ func New(cfg *config.Config) AppModel {
 	sp.Style = lipgloss.NewStyle().Foreground(colorAccent)
 
 	hidden := make(map[string]bool)
+	fetching := make(map[string]bool)
 	for _, am := range cfg.Alertmanagers {
 		if am.Hidden {
 			hidden[am.Name] = true
 		}
+		fetching[am.Name] = true
 	}
 
 	return AppModel{
@@ -116,6 +119,8 @@ func New(cfg *config.Config) AppModel {
 		spinner:           sp,
 		loading:           true,
 		hiddenInstances:   hidden,
+		fetchingInstances: fetching,
+		instErrs:          make(map[string]error),
 		groupLabelIdx:     -1,
 		collapsedSections: make(map[string]bool),
 	}
@@ -143,11 +148,13 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case tickMsg:
+		m.markAllFetching()
 		return m, tea.Batch(fetchAlerts(m.cfg), scheduleTick(m.cfg.GetRefreshInterval()))
 
 	case alertsFetchedMsg:
 		m.loading = false
 		m.lastRefresh = time.Now()
+		m.fetchingInstances = make(map[string]bool)
 		m.groups = msg.groups
 		all := flattenGroups(msg.groups)
 		m.alerts, m.failingChecks = partitionHealthchecks(all, m.cfg.Healthchecks)
@@ -166,6 +173,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.statusMsg = lipgloss.NewStyle().Foreground(colorGood).Render("Acknowledged.")
 			m.loading = true
+			m.markAllFetching()
 			return m, fetchAlerts(m.cfg)
 		}
 		return m, nil
@@ -275,6 +283,7 @@ func (m AppModel) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, textinput.Blink
 	case "r":
 		m.loading = true
+		m.markAllFetching()
 		return m, fetchAlerts(m.cfg)
 	case "?":
 		m.mode = modeHelp
@@ -608,6 +617,12 @@ func (m AppModel) renderHelp() string {
 	return lipgloss.JoinVertical(lipgloss.Left, header, help)
 }
 
+func (m *AppModel) markAllFetching() {
+	for _, am := range m.cfg.Alertmanagers {
+		m.fetchingInstances[am.Name] = true
+	}
+}
+
 func (m AppModel) renderHeader() string {
 	counts := countActiveAlertsByInstance(m.alerts)
 	left := styleHeader.Render("larm02")
@@ -616,8 +631,8 @@ func (m AppModel) renderHeader() string {
 		switch {
 		case m.hiddenInstances[am.Name]:
 			s = styleInstanceHidden
-		case m.instErrs == nil:
-			s = styleInstance
+		case m.fetchingInstances[am.Name]:
+			s = styleInstanceFetching
 		case m.instErrs[am.Name] != nil || m.instUnhealthy[am.Name]:
 			s = styleInstanceBad
 		default:

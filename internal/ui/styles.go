@@ -14,10 +14,11 @@ var (
 	colorAccent   lipgloss.Color
 
 	styleHeader        lipgloss.Style
-	styleInstance       lipgloss.Style
-	styleInstanceHidden lipgloss.Style
-	styleInstanceGood   lipgloss.Style
-	styleInstanceBad    lipgloss.Style
+	styleInstance          lipgloss.Style
+	styleInstanceHidden    lipgloss.Style
+	styleInstanceGood      lipgloss.Style
+	styleInstanceBad       lipgloss.Style
+	styleInstanceFetching  lipgloss.Style
 	styleRefresh       lipgloss.Style
 	styleFooter        lipgloss.Style
 	styleFooterKey     lipgloss.Style
@@ -70,14 +71,20 @@ func ApplyTheme(t config.Theme) {
 		MarginLeft(1)
 
 	styleInstanceGood = lipgloss.NewStyle().
-		Foreground(fg).
+		Foreground(hdrBg).
 		Background(colorGood).
 		PaddingLeft(1).PaddingRight(1).
 		MarginLeft(1)
 
 	styleInstanceBad = lipgloss.NewStyle().
-		Foreground(fg).
+		Foreground(hdrBg).
 		Background(colorCritical).
+		PaddingLeft(1).PaddingRight(1).
+		MarginLeft(1)
+
+	styleInstanceFetching = lipgloss.NewStyle().
+		Foreground(hdrBg).
+		Background(colorWarning).
 		PaddingLeft(1).PaddingRight(1).
 		MarginLeft(1)
 
