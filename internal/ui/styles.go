@@ -70,14 +70,14 @@ func ApplyTheme(t config.Theme) {
 		MarginLeft(1)
 
 	styleInstanceGood = lipgloss.NewStyle().
-		Foreground(colorGood).
-		Background(instBg).
+		Foreground(fg).
+		Background(colorGood).
 		PaddingLeft(1).PaddingRight(1).
 		MarginLeft(1)
 
 	styleInstanceBad = lipgloss.NewStyle().
-		Foreground(colorCritical).
-		Background(instBg).
+		Foreground(fg).
+		Background(colorCritical).
 		PaddingLeft(1).PaddingRight(1).
 		MarginLeft(1)
 
