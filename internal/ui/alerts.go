@@ -88,10 +88,8 @@ func renderAlertsTable(items []displayItem, cursor, width, height int, loading b
 		var line string
 		switch item.kind {
 		case displayItemSection:
-			line = renderSectionHeader(item, width)
-			if i == cursor {
-				line = styleSelected.Width(width).Render(line)
-			}
+			sb.WriteString("\n")
+			line = renderSectionHeader(item, width, i == cursor)
 		case displayItemGroup:
 			row := formatGroupRow(item.group, item.alerts, nameWidth, extraCols)
 			line = "  " + row
@@ -166,7 +164,7 @@ func formatRow(a alertmanager.Alert, nameWidth int, extraCols []config.ColumnCon
 	return strings.Join(cells, " ")
 }
 
-func renderSectionHeader(item displayItem, width int) string {
+func renderSectionHeader(item displayItem, width int, selected bool) string {
 	arrow := "▼"
 	if item.collapsed {
 		arrow = "▶"
@@ -177,7 +175,11 @@ func renderSectionHeader(item displayItem, width int) string {
 	}
 	label := fmt.Sprintf("%s=%s", item.sectionLabel, item.sectionValue)
 	text := fmt.Sprintf("%s  %s  (%d %s)", arrow, label, item.groupCount, noun)
-	return styleSectionHeader.Width(width).Render(text)
+	style := styleSectionHeader
+	if selected {
+		style = styleSectionHeaderSelected
+	}
+	return style.Width(width).Render(text)
 }
 
 func maxSeverity(alerts []alertmanager.Alert) string {

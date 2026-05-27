@@ -24,8 +24,9 @@ var (
 	styleError         lipgloss.Style
 	styleDetailKey     lipgloss.Style
 	styleDetailVal     lipgloss.Style
-	styleSectionHeader lipgloss.Style
-	styleHeaderCell    lipgloss.Style
+	styleSectionHeader         lipgloss.Style
+	styleSectionHeaderSelected lipgloss.Style
+	styleHeaderCell            lipgloss.Style
 	styleSelected      lipgloss.Style
 )
 
@@ -99,8 +100,12 @@ func ApplyTheme(t config.Theme) {
 	styleSectionHeader = lipgloss.NewStyle().
 		Foreground(colorMuted).
 		Background(hdrBg).
-		PaddingLeft(1).
-		MarginTop(1)
+		PaddingLeft(1)
+
+	styleSectionHeaderSelected = lipgloss.NewStyle().
+		Foreground(colorAccent).
+		Background(hdrBg).
+		PaddingLeft(1)
 
 	styleHeaderCell = lipgloss.NewStyle().
 		Bold(true).

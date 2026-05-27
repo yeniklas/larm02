@@ -41,10 +41,14 @@ func renderDetail(a alertmanager.Alert, width int) string {
 		sb.WriteString(styleDetailKey.Render("inhibited by") + styleDetailVal.Render(strings.Join(a.Status.InhibitedBy, ", ")) + "\n")
 	}
 	if a.GeneratorURL != "" {
-		sb.WriteString(styleDetailKey.Render("source") + styleDetailVal.Render(a.GeneratorURL) + "\n")
+		sb.WriteString(styleDetailKey.Render("source") + styleDetailVal.Render(a.GeneratorURL) + "  " + styleFooterKey.Render("[c]") + styleFooter.Render(" copy") + "\n")
 	}
 
-	sb.WriteString("\n" + styleFooter.Render("<ESC> back"))
+	footer := "<ESC> back"
+	if a.GeneratorURL != "" {
+		footer += "  ·  <c> copy source"
+	}
+	sb.WriteString("\n" + styleFooter.Render(footer))
 
 	return sb.String()
 }

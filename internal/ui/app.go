@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -362,6 +363,17 @@ func (m AppModel) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "a":
 		if m.cursor < len(m.items) && len(m.items[m.cursor].alerts) > 0 {
 			return m, acknowledgeAlert(m.items[m.cursor].alerts[m.groupDetailCursor], m.cfg)
+		}
+	case "c":
+		if m.cursor < len(m.items) && len(m.items[m.cursor].alerts) > 0 {
+			url := m.items[m.cursor].alerts[m.groupDetailCursor].GeneratorURL
+			if url != "" {
+				if err := clipboard.WriteAll(url); err == nil {
+					m.statusMsg = lipgloss.NewStyle().Foreground(colorGood).Render("Copied source to clipboard.")
+				} else {
+					m.statusMsg = styleError.Render("Copy failed: " + err.Error())
+				}
+			}
 		}
 	}
 	return m, nil
